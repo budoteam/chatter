@@ -21,6 +21,20 @@ settings:
     SWIFT_EMIT_LOC_STRINGS: YES
     ENABLE_USER_SCRIPT_SANDBOXING: YES
 
+schemes:
+  Chatter:
+    build:
+      targets:
+        Chatter: all
+    run:
+      config: Debug
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
+
 targets:
   Chatter:
     type: application
@@ -30,6 +44,15 @@ targets:
       macOS: "14.0"
     sources:
       - path: Chatter
+    info:
+      path: Chatter/Info.plist
+      properties:
+        # User-configured MCP servers are often self-hosted over plain HTTP
+        # (LAN / Tailscale), so allow non-TLS connections.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        # iOS prompts for this when connecting to servers on the local network.
+        NSLocalNetworkUsageDescription: Chatter connects to MCP servers on your local network.
     dependencies:
       - package: MCP
         product: MCP

@@ -1,69 +1,190 @@
 import SwiftUI
 
-/// Renders one persisted message according to its role.
-struct MessageRow: View {
-    let message: Message
-
-    var body: some View {
-        switch message.role {
-        case .user:
-            UserBubble(text: message.content)
-        case .assistant:
-            AssistantMessage(message: message)
-        case .tool:
-            ToolResultCard(message: message)
-        case .system:
-            EmptyView()
-        }
-    }
-}
-
 // MARK: - User
 
-private struct UserBubble: View {
+struct UserBubble: View {
     let text: String
 
     var body: some View {
         HStack {
-            Spacer(minLength: 40)
+            Spacer(minLength: 56)
             Text(text)
                 .textSelection(.enabled)
-                .padding(.horizontal, 14)
+                .padding(.horizontal, 15)
                 .padding(.vertical, 10)
-                .background(Theme.userBubble, in: RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous))
+                .background(
+                    Theme.userBubble,
+                    in: UnevenRoundedRectangle(
+                        topLeadingRadius: 20, bottomLeadingRadius: 20,
+                        bottomTrailingRadius: 6, topTrailingRadius: 20,
+                        style: .continuous
+                    )
+                )
         }
     }
 }
 
-// MARK: - Assistant
+// MARK: - Assistant (final answer)
 
-private struct AssistantMessage: View {
+struct AssistantMessage: View {
     let message: Message
+
+    private var agent: Agent? { message.session?.agent }
+    private var thinking: String { message.thinking ?? "" }
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            AgentBadge(symbol: "sparkles", color: Theme.accent, size: 28)
+            AgentBadge(
+                symbol: agent?.iconSymbol ?? "sparkles",
+                color: agent?.color ?? Theme.accent,
+                size: 26
+            )
+            .padding(.top, 2)
+
             VStack(alignment: .leading, spacing: 8) {
-                if message.content.isEmpty && message.isStreaming {
-                    TypingIndicator().padding(.top, 6)
-                } else {
-                    Text(Self.markdown(message.content))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                if !thinking.isEmpty {
+                    ThoughtsDisclosure(
+                        text: thinking,
+                        isThinking: message.isStreaming && message.content.isEmpty
+                    )
                 }
-                ForEach(message.toolCalls) { call in
-                    ToolCallCard(call: call)
+                if message.content.isEmpty && message.isStreaming && thinking.isEmpty {
+                    TypingIndicator().padding(.top, 6)
+                } else if !message.content.isEmpty {
+                    MarkdownText(text: message.content)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
             Spacer(minLength: 0)
         }
     }
+}
 
-    static func markdown(_ string: String) -> AttributedString {
-        (try? AttributedString(
-            markdown: string,
-            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        )) ?? AttributedString(string)
+// MARK: - Thoughts (reasoning trace, collapsed once done)
+
+struct ThoughtsDisclosure: View {
+    let text: String
+    /// True while the model is still reasoning — keeps the trace visible live.
+    var isThinking: Bool = false
+
+    @State private var expanded = false
+
+    private var isOpen: Bool { expanded || isThinking }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button { withAnimation(.easeInOut(duration: 0.18)) { expanded.toggle() } } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "brain")
+                        .font(.system(size: 10, weight: .medium))
+                    Text(isThinking ? "Thinking…" : "Thoughts")
+                    Image(systemName: isOpen ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 8, weight: .bold))
+                }
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isOpen {
+                MarkdownText(text: text)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 12)
+                    .overlay(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 1.5)
+                            .fill(Theme.separator)
+                            .frame(width: 3)
+                    }
+            }
+        }
+    }
+}
+
+// MARK: - Activity group (tool steps of one turn, collapsed once finished)
+
+/// Wraps the intermediate steps of an agentic turn — assistant snippets, tool
+/// calls, and tool results. Expanded while running; collapses to a one-line
+/// summary as soon as the final answer arrives.
+struct ActivityGroupView: View {
+    let steps: [Message]
+    let live: Bool
+
+    @State private var expanded = false
+
+    private var toolCallCount: Int {
+        steps.filter { $0.role == .tool }.count
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button { withAnimation(.easeInOut(duration: 0.18)) { expanded.toggle() } } label: {
+                HStack(spacing: 8) {
+                    if live {
+                        ProgressView().controlSize(.small)
+                        Text("Working — running tools…")
+                    } else {
+                        Image(systemName: "wrench.and.screwdriver")
+                            .font(.system(size: 10, weight: .medium))
+                        Text(toolCallCount == 1 ? "Used 1 tool" : "Used \(toolCallCount) tools")
+                    }
+                    Spacer(minLength: 0)
+                    if !live {
+                        Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 9, weight: .bold))
+                    }
+                }
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if expanded || live {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(steps) { StepView(message: $0) }
+                }
+                .padding(.top, 12)
+            }
+        }
+        .padding(12)
+        .background(
+            Theme.surfaceRaised.opacity(0.45),
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
+        .padding(.leading, 36)  // aligns with the assistant text column
+    }
+}
+
+/// One intermediate step inside an activity group.
+private struct StepView: View {
+    let message: Message
+
+    var body: some View {
+        switch message.role {
+        case .assistant:
+            VStack(alignment: .leading, spacing: 8) {
+                if let thinking = message.thinking, !thinking.isEmpty {
+                    ThoughtsDisclosure(
+                        text: thinking,
+                        isThinking: message.isStreaming && message.content.isEmpty
+                    )
+                }
+                if !message.content.isEmpty {
+                    MarkdownText(text: message.content)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(message.toolCalls) { call in
+                    ToolCallCard(call: call)
+                }
+            }
+        case .tool:
+            ToolResultCard(message: message)
+        default:
+            EmptyView()
+        }
     }
 }
 
@@ -75,10 +196,10 @@ struct ToolCallCard: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "wrench.and.screwdriver.fill")
-                .font(.caption)
+                .font(.caption2)
                 .foregroundStyle(Theme.accent)
             VStack(alignment: .leading, spacing: 1) {
-                Text("Called \(displayName)")
+                Text(displayName)
                     .font(.caption.weight(.medium))
                 if !call.argumentsJSON.isEmpty && call.argumentsJSON != "{}" {
                     Text(call.argumentsJSON)
@@ -87,10 +208,10 @@ struct ToolCallCard: View {
                         .lineLimit(2)
                 }
             }
-            Spacer()
+            Spacer(minLength: 0)
         }
         .padding(10)
-        .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Theme.Radius.sm))
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     private var displayName: String {
@@ -100,7 +221,7 @@ struct ToolCallCard: View {
 
 // MARK: - Tool result (returned to the model)
 
-private struct ToolResultCard: View {
+struct ToolResultCard: View {
     let message: Message
     @State private var expanded = false
 
@@ -109,30 +230,35 @@ private struct ToolResultCard: View {
             Button { withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() } } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "arrow.turn.down.right")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Text("Result from \(displayName)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text(displayName)
                         .font(.caption.weight(.medium))
                         .foregroundStyle(.secondary)
-                    Spacer()
+                    Spacer(minLength: 0)
                     Image(systemName: expanded ? "chevron.up" : "chevron.down")
-                        .font(.caption2).foregroundStyle(.secondary)
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.secondary)
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
             if expanded {
-                Text(message.content)
-                    .font(.caption.monospaced())
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                ScrollView {
+                    Text(message.content)
+                        .font(.caption.monospaced())
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 240)
             }
         }
         .padding(10)
-        .background(Theme.surfaceRaised.opacity(0.6), in: RoundedRectangle(cornerRadius: Theme.Radius.sm))
+        .background(Theme.surface.opacity(0.6), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     private var displayName: String {
-        (message.toolName ?? "tool").replacingOccurrences(of: "__", with: " › ")
+        "Result: " + (message.toolName ?? "tool").replacingOccurrences(of: "__", with: " › ")
     }
 }

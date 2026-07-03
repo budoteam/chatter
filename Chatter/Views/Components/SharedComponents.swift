@@ -85,15 +85,15 @@ struct AgentBadge: View {
 
     var body: some View {
         Image(systemName: symbol)
-            .font(.system(size: size * 0.5, weight: .semibold))
+            .font(.system(size: size * 0.45, weight: .semibold))
             .foregroundStyle(.white)
             .frame(width: size, height: size)
             .background(
                 LinearGradient(
-                    colors: [color, color.opacity(0.7)],
-                    startPoint: .top, endPoint: .bottom
+                    colors: [color, color.opacity(0.72)],
+                    startPoint: .topLeading, endPoint: .bottomTrailing
                 ),
-                in: RoundedRectangle(cornerRadius: size * 0.32, style: .continuous)
+                in: Circle()
             )
     }
 }

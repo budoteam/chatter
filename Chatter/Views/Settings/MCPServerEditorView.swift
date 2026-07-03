@@ -50,7 +50,7 @@ struct MCPServerEditorView: View {
                 } header: {
                     Text("Connection")
                 } footer: {
-                    Text("SSE keeps a stream open for server-initiated messages; HTTP uses plain request/response.")
+                    Text("Streamable HTTP is the modern MCP transport. Choose SSE (legacy) for servers exposing a /sse endpoint, e.g. supergateway or mcp-proxy bridges.")
                 }
 
                 Section("Auth Header (optional)") {

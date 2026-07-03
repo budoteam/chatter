@@ -51,10 +51,11 @@ final class ChatEngine {
             iteration += 1
 
             // Build the request from the persisted history (system prompt first).
-            var msgs: [OllamaChatMessage] = []
-            if let prompt = agent?.systemPrompt, !prompt.isEmpty {
-                msgs.append(OllamaChatMessage(role: "system", content: prompt))
-            }
+            // Rebuilt every iteration, so the timestamp stays current across
+            // long tool loops.
+            var msgs: [OllamaChatMessage] = [
+                OllamaChatMessage(role: "system", content: Self.systemPrompt(for: agent))
+            ]
             msgs.append(contentsOf: session.orderedMessages.map(Self.toOllama))
 
             // Live assistant message the view streams into.
@@ -66,24 +67,51 @@ final class ChatEngine {
             context.insert(assistant)
 
             var toolCalls: [OllamaToolCall] = []
+            // Tokens are buffered and flushed at ~12 Hz: mutating the @Model
+            // per token re-renders (and re-parses Markdown for) the whole
+            // message on every delta, which stalls the main thread on long
+            // answers (gesture-gate / pasteboard timeouts).
+            var pendingContent = ""
+            var pendingThinking = ""
+            var lastFlush = ContinuousClock.now
+
+            func flushPending(force: Bool = false) {
+                let now = ContinuousClock.now
+                guard force || now - lastFlush > .milliseconds(80) else { return }
+                if !pendingContent.isEmpty {
+                    assistant.content += pendingContent
+                    pendingContent = ""
+                }
+                if !pendingThinking.isEmpty {
+                    assistant.thinking = (assistant.thinking ?? "") + pendingThinking
+                    pendingThinking = ""
+                }
+                lastFlush = now
+            }
+
             do {
                 for try await chunk in ollama.streamChat(
                     model: model, messages: msgs, tools: tools,
                     temperature: agent?.temperature ?? 0.7
                 ) {
                     switch chunk {
-                    case .delta(let piece): assistant.content += piece
+                    case .delta(let piece): pendingContent += piece
+                    case .thinking(let piece): pendingThinking += piece
                     case .toolCalls(let calls): toolCalls.append(contentsOf: calls)
                     case .done: break
                     }
+                    flushPending()
                 }
+                flushPending(force: true)
             } catch is CancellationError {
                 // User stopped — keep whatever streamed in, no error surface.
+                flushPending(force: true)
                 assistant.isStreaming = false
                 session.updatedAt = .now
                 try? context.save()
                 return
             } catch {
+                flushPending(force: true)
                 assistant.isStreaming = false
                 // Don't leave an empty bubble behind; the error is surfaced
                 // via the view model's alert.
@@ -136,6 +164,19 @@ final class ChatEngine {
     }
 
     // MARK: - Helpers
+
+    private static let timestampFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "dd.MM.yyyy HH:mm"
+        return formatter
+    }()
+
+    /// The agent's system prompt, always ending with the current date & time.
+    private static func systemPrompt(for agent: Agent?) -> String {
+        let timestamp = "Current Date and Time: \(timestampFormatter.string(from: Date()))"
+        let prompt = agent?.systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return prompt.isEmpty ? timestamp : prompt + "\n\n" + timestamp
+    }
 
     private func resolveModel(agent: Agent?, session: ChatSession) -> String {
         if let m = agent?.modelId, !m.isEmpty { return m }

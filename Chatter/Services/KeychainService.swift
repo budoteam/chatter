@@ -7,44 +7,55 @@ enum KeychainService {
     private static let service = "team.budo.chatter"
     private static let apiKeyAccount = "ollamaApiKey"
 
+    private static var baseQuery: [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: apiKeyAccount,
+        ]
+    }
+
     static func saveAPIKey(_ key: String) throws {
+        // Pasted keys often carry a trailing newline/space; Ollama's /api/chat
+        // rejects the resulting header with 401 (while /api/tags tolerates it).
+        let key = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let data = key.data(using: .utf8) else { return }
 
-        // Must include kSecAttrSynchronizable, otherwise the query won't match
-        // the synchronizable item we add below and re-saving fails with
+        // Remove any previous item (synced or local) so re-saving never hits
         // errSecDuplicateItem.
-        let deleteQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: apiKeyAccount,
-            kSecAttrSynchronizable as String: kSecAttrSynchronizableAny,
-        ]
-        SecItemDelete(deleteQuery as CFDictionary)
+        deleteAPIKey()
 
-        let addQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: apiKeyAccount,
-            kSecValueData as String: data,
-            kSecAttrSynchronizable as String: true,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
-        ]
+        var addQuery = baseQuery
+        addQuery[kSecValueData as String] = data
+        addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        addQuery[kSecAttrSynchronizable as String] = true
 
-        let status = SecItemAdd(addQuery as CFDictionary, nil)
+        var status = SecItemAdd(addQuery as CFDictionary, nil)
+        if status == errSecMissingEntitlement {
+            // iCloud Keychain sync needs a provisioned keychain access group.
+            // Without a signing team (ad-hoc/dev builds) fall back to a local,
+            // non-syncing item.
+            addQuery[kSecAttrSynchronizable as String] = nil
+            status = SecItemAdd(addQuery as CFDictionary, nil)
+        }
         guard status == errSecSuccess else {
             throw KeychainError.saveFailed(status)
         }
     }
 
     static func loadAPIKey() -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: apiKeyAccount,
-            kSecAttrSynchronizable as String: kSecAttrSynchronizableAny,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
+        // Prefer the synced item, fall back to a local one.
+        if let key = load(synchronizable: true) { return key }
+        return load(synchronizable: false)
+    }
+
+    private static func load(synchronizable: Bool) -> String? {
+        var query = baseQuery
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        if synchronizable {
+            query[kSecAttrSynchronizable as String] = kSecAttrSynchronizableAny
+        }
 
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
@@ -58,13 +69,10 @@ enum KeychainService {
     }
 
     static func deleteAPIKey() {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: apiKeyAccount,
-            kSecAttrSynchronizable as String: kSecAttrSynchronizableAny,
-        ]
-        SecItemDelete(query as CFDictionary)
+        var syncedQuery = baseQuery
+        syncedQuery[kSecAttrSynchronizable as String] = kSecAttrSynchronizableAny
+        SecItemDelete(syncedQuery as CFDictionary)
+        SecItemDelete(baseQuery as CFDictionary)
     }
 
     static var hasAPIKey: Bool {

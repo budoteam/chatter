@@ -34,7 +34,10 @@ struct OllamaService: OllamaServiceProtocol {
     }
 
     private func makeRequest(path: String, method: String) throws -> URLRequest {
-        guard let key = KeychainService.loadAPIKey(), !key.isEmpty else {
+        // Sanitize on load too, so keys stored with stray whitespace by older
+        // builds keep working without re-entry.
+        guard let key = KeychainService.loadAPIKey()?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !key.isEmpty else {
             throw ServiceError.missingAPIKey
         }
         var request = URLRequest(url: baseURL.appendingPathComponent(path))
@@ -105,6 +108,9 @@ struct OllamaService: OllamaServiceProtocol {
                         }
                         if let calls = chunk.message?.toolCalls, !calls.isEmpty {
                             continuation.yield(.toolCalls(calls))
+                        }
+                        if let thinking = chunk.message?.thinking, !thinking.isEmpty {
+                            continuation.yield(.thinking(thinking))
                         }
                         if let content = chunk.message?.content, !content.isEmpty {
                             continuation.yield(.delta(content))

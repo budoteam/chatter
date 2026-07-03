@@ -25,8 +25,12 @@ The Xcode project is generated from `project.yml` with [XcodeGen](https://github
 
 ```bash
 brew install xcodegen   # if needed
-xcodegen generate
+./generate.sh           # runs xcodegen + patches the scheme
 ```
+
+> `generate.sh` also disables the scheme option "Enable backtrace recording"
+> (Queue Debugging) — on Xcode 26 / macOS 26 it crashes the app under the
+> debugger with `-[OS_dispatch_mach_msg _setContext:]`.
 
 ## Build & run
 

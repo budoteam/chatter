@@ -30,9 +30,15 @@ struct SettingsView: View {
         .onAppear { apiKey = KeychainService.loadAPIKey() ?? "" }
         .sheet(item: $editingServer) { server in
             NavigationStack { MCPServerEditorView(server: server) }
+                #if os(macOS)
+                .frame(minWidth: 480, minHeight: 520)
+                #endif
         }
         .sheet(isPresented: $showingNewServer) {
             NavigationStack { MCPServerEditorView(server: nil) }
+                #if os(macOS)
+                .frame(minWidth: 480, minHeight: 520)
+                #endif
         }
     }
 
@@ -51,6 +57,17 @@ struct SettingsView: View {
             }
             if savedConfirmation {
                 Label("Saved", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green).font(.caption)
+            }
+            // Live connection status so a bad key (401 etc.) is visible here.
+            if env.isLoadingModels {
+                Label("Checking key…", systemImage: "hourglass")
+                    .foregroundStyle(.secondary).font(.caption)
+            } else if let error = env.modelLoadError {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange).font(.caption)
+            } else if !env.models.isEmpty {
+                Label("Connected — \(env.models.count) models available", systemImage: "checkmark.circle.fill")
                     .foregroundStyle(.green).font(.caption)
             }
         } header: {
@@ -129,7 +146,7 @@ struct SettingsView: View {
 
     private func saveKey() {
         do {
-            try KeychainService.saveAPIKey(apiKey.trimmingCharacters(in: .whitespaces))
+            try KeychainService.saveAPIKey(apiKey.trimmingCharacters(in: .whitespacesAndNewlines))
             env.refreshAPIKeyState()
             savedConfirmation = true
             Task {

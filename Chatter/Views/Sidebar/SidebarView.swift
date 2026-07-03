@@ -18,29 +18,54 @@ struct SidebarView: View {
             sessionsSection
         }
         .listStyle(.sidebar)
+        .environment(\.defaultMinListRowHeight, 36)
+        .safeAreaInset(edge: .top, spacing: 0) { newChatButton }
         .navigationTitle("Chatter")
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    startNewSession(agent: defaultAgent)
-                } label: {
-                    Label("New Chat", systemImage: "square.and.pencil")
-                }
-            }
-            #if !os(macOS)
-            ToolbarItem(placement: .topBarLeading) {
+            ToolbarItem(placement: .topBarTrailing) {
                 Button { showSettings = true } label: {
                     Label("Settings", systemImage: "gearshape")
                 }
             }
-            #endif
         }
+        #endif
         .sheet(item: $editingAgent) { agent in
             NavigationStack { AgentEditorView(agent: agent) }
+                #if os(macOS)
+                .frame(minWidth: 500, minHeight: 620)
+                #endif
         }
         .sheet(isPresented: $showingNewAgent) {
             NavigationStack { AgentEditorView(agent: nil) }
+                #if os(macOS)
+                .frame(minWidth: 500, minHeight: 620)
+                #endif
         }
+    }
+
+    // MARK: - New Chat
+
+    private var newChatButton: some View {
+        Button { startNewSession(agent: defaultAgent) } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "plus.bubble.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                Text("New Chat")
+                    .font(.subheadline.weight(.semibold))
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 11)
+            .background(Theme.brandGradient, in: Capsule())
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)  // ⌘N comes from the app-level command
+        .padding(.horizontal, 14)
+        .padding(.top, 10)
+        .padding(.bottom, 4)
     }
 
     // MARK: - Agents
@@ -50,39 +75,42 @@ struct SidebarView: View {
             ForEach(agents) { agent in
                 Button { startNewSession(agent: agent) } label: {
                     HStack(spacing: 10) {
-                        AgentBadge(symbol: agent.iconSymbol, color: agent.color, size: 28)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(agent.name).font(.subheadline.weight(.medium))
-                            if !agent.modelId.isEmpty {
-                                Text(agent.modelId)
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-                        }
-                        Spacer()
+                        AgentBadge(symbol: agent.iconSymbol, color: agent.color, size: 26)
+                        Text(agent.name)
+                            .font(.subheadline.weight(.medium))
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
                     }
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .contextMenu {
-                    Button("Edit") { editingAgent = agent }
                     Button("New Chat") { startNewSession(agent: agent) }
+                    Button("Edit…") { editingAgent = agent }
                     if agents.count > 1 {
+                        Divider()
                         Button("Delete", role: .destructive) { delete(agent) }
                     }
                 }
             }
-        } header: {
-            HStack {
-                Text("Agents")
-                Spacer()
-                Button { showingNewAgent = true } label: {
+
+            Button { showingNewAgent = true } label: {
+                HStack(spacing: 10) {
                     Image(systemName: "plus")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(Theme.accent)
+                        .frame(width: 26, height: 26)
+                        .background(Theme.accent.opacity(0.12), in: Circle())
+                    Text("New Agent")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(Theme.accent)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+        } header: {
+            sectionHeader("Agents")
         }
     }
 
@@ -90,18 +118,32 @@ struct SidebarView: View {
 
     private var sessionsSection: some View {
         ForEach(SessionGroup.grouped(sessions), id: \.title) { group in
-            Section(group.title) {
+            Section {
                 ForEach(group.sessions) { session in
-                    SessionRow(session: session)
+                    Text(session.title.isEmpty ? "New Chat" : session.title)
+                        .font(.subheadline)
+                        .lineLimit(1)
                         .tag(session)
+                        .contextMenu {
+                            Button("Delete", role: .destructive) { delete(session) }
+                        }
                         .swipeActions(edge: .trailing) {
                             Button(role: .destructive) { delete(session) } label: {
                                 Label("Delete", systemImage: "trash")
                             }
                         }
                 }
+            } header: {
+                sectionHeader(group.title)
             }
         }
+    }
+
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.tertiary)
+            .textCase(.uppercase)
     }
 
     // MARK: - Selection
@@ -130,22 +172,6 @@ struct SidebarView: View {
     private func delete(_ agent: Agent) {
         context.delete(agent)
         try? context.save()
-    }
-}
-
-private struct SessionRow: View {
-    let session: ChatSession
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: session.agent?.iconSymbol ?? "bubble.left")
-                .font(.caption)
-                .foregroundStyle(session.agent?.color ?? Theme.accent)
-                .frame(width: 18)
-            Text(session.title.isEmpty ? "New Chat" : session.title)
-                .lineLimit(1)
-            Spacer()
-        }
     }
 }
 

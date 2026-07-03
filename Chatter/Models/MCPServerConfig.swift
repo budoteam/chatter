@@ -2,16 +2,16 @@ import Foundation
 import SwiftData
 
 enum MCPTransportKind: String, Codable, CaseIterable, Identifiable {
-    case http   // Streamable HTTP (request/response, optional SSE off)
-    case sse    // Streamable HTTP with Server-Sent Events streaming
+    case http   // Streamable HTTP (modern MCP transport)
+    case sse    // Legacy HTTP+SSE ("/sse" endpoints, supergateway/mcp-proxy)
     case stdio  // Local subprocess (macOS only)
 
     var id: String { rawValue }
 
     var label: String {
         switch self {
-        case .http: return "HTTP"
-        case .sse: return "SSE"
+        case .http: return "Streamable HTTP"
+        case .sse: return "SSE (legacy)"
         case .stdio: return "stdio (local)"
         }
     }

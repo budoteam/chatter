@@ -22,6 +22,8 @@ final class Message {
     var toolCallsJSON: String?
     /// For `tool` role messages: which tool produced this result.
     var toolName: String?
+    /// Reasoning trace from thinking models (shown collapsed in the UI).
+    var thinking: String?
     /// True while tokens are still streaming into `content`.
     var isStreaming: Bool = false
 

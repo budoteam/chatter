@@ -117,15 +117,21 @@ final class MCPConnectionManager: MCPClientProtocol {
             }
             let key = config.headerKey.trimmingCharacters(in: .whitespaces)
             let value = config.headerValue
+            let modifier: (URLRequest) -> URLRequest = { request in
+                guard !key.isEmpty else { return request }
+                var req = request
+                req.setValue(value, forHTTPHeaderField: key)
+                return req
+            }
+            if config.transport == .sse {
+                // Legacy HTTP+SSE protocol (supergateway/mcp-proxy style
+                // "/sse" endpoints) — these answer 405 to Streamable HTTP.
+                return LegacySSEClientTransport(endpoint: url, requestModifier: modifier)
+            }
             return HTTPClientTransport(
                 endpoint: url,
-                streaming: config.transport == .sse,
-                requestModifier: { request in
-                    guard !key.isEmpty else { return request }
-                    var req = request
-                    req.setValue(value, forHTTPHeaderField: key)
-                    return req
-                }
+                streaming: false,
+                requestModifier: modifier
             )
 
         case .stdio:

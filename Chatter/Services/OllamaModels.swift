@@ -102,10 +102,11 @@ struct OllamaChatStreamLine: Codable {
     struct Delta: Codable {
         var role: String?
         var content: String?
+        var thinking: String?
         var toolCalls: [OllamaToolCall]?
 
         enum CodingKeys: String, CodingKey {
-            case role, content
+            case role, content, thinking
             case toolCalls = "tool_calls"
         }
     }
@@ -114,6 +115,7 @@ struct OllamaChatStreamLine: Codable {
 /// What `streamChat` emits to callers.
 enum OllamaChatChunk {
     case delta(String)                 // incremental assistant text
+    case thinking(String)              // incremental reasoning trace
     case toolCalls([OllamaToolCall])   // model requested tools
     case done(reason: String?)         // stream finished
 }

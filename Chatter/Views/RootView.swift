@@ -31,6 +31,10 @@ struct RootView: View {
             }
             .background(GeminiBackground())
         }
+        .navigationSplitViewStyle(.balanced)
+        #if os(macOS)
+        .frame(minWidth: 860, minHeight: 560)
+        #endif
         .sheet(isPresented: $showSettings) {
             NavigationStack { SettingsView() }
         }
