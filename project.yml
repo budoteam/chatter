@@ -17,7 +17,7 @@ settings:
     CURRENT_PROJECT_VERSION: "1"
     SWIFT_VERSION: "5.0"
     CODE_SIGN_STYLE: Automatic
-    DEVELOPMENT_TEAM: ""
+    DEVELOPMENT_TEAM: X9FHM3F6WK
     SWIFT_EMIT_LOC_STRINGS: YES
     ENABLE_USER_SCRIPT_SANDBOXING: YES
 
@@ -53,6 +53,9 @@ targets:
           NSAllowsArbitraryLoads: true
         # iOS prompts for this when connecting to servers on the local network.
         NSLocalNetworkUsageDescription: Chatter connects to MCP servers on your local network.
+        # Only HTTPS/ATS-exempt networking, no custom crypto — skips the
+        # export-compliance question on every TestFlight upload.
+        ITSAppUsesNonExemptEncryption: false
     dependencies:
       - package: MCP
         product: MCP
@@ -65,15 +68,13 @@ targets:
         INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.productivity"
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
-        INFOPLIST_KEY_UISupportedInterfaceOrientations__iPhone: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        # iPad multitasking requires all four orientations, otherwise
+        # App Store Connect rejects the build at upload validation.
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_PREVIEWS: YES
         SWIFT_APPROACHABLE_CONCURRENCY: YES
-      configs:
-        debug:
-          CODE_SIGN_IDENTITY: "-"
-        release:
-          CODE_SIGN_IDENTITY: "-"
     entitlements:
       path: Chatter/Chatter.entitlements
       properties:
