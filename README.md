@@ -46,20 +46,23 @@ xcodebuild -project Chatter.xcodeproj -scheme Chatter -destination 'platform=mac
 open Chatter.xcodeproj
 ```
 
-## Enabling CloudKit sync
+## CloudKit sync
 
-The app builds and runs without a signing team (local store). To turn on cross-device sync:
+CloudKit sync is configured: container `iCloud.team.budo.chatter`, per-platform
+entitlements (`Chatter/Chatter-iOS.entitlements`, `Chatter/Chatter-macOS.entitlements`)
+with CloudKit + push, and the `remote-notification` background mode so devices pick up
+changes promptly. `Persistence.makeContainer()` requests `.automatic` CloudKit and falls
+back to a local store when iCloud is unavailable (e.g. no signed-in account).
 
-1. Set your `DEVELOPMENT_TEAM` in `project.yml` and re-run `xcodegen generate`.
-2. In Signing & Capabilities, add **iCloud → CloudKit** with a container
-   (e.g. `iCloud.team.budo.chatter`) and, optionally, Background Modes → Remote notifications.
-3. `Persistence.makeContainer()` already requests `.automatic` CloudKit and will start syncing.
+Signing uses `DEVELOPMENT_TEAM` from `project.yml`; building for a different team means
+changing that value and the container ID.
 
 ## macOS stdio MCP servers
 
 stdio servers are launched as subprocesses, so the macOS target ships with the App Sandbox
-**disabled** (`Chatter.entitlements`). This is fine for local/dev use; a sandboxed App Store
-build would need to drop stdio (HTTP/SSE still work everywhere).
+**disabled** (`Chatter/Chatter-macOS.entitlements`). This is fine for local/dev use; a
+sandboxed App Store build would need to drop stdio (HTTP/SSE still work everywhere).
+Distributing the Mac app therefore means Developer ID + notarization, not the Mac App Store.
 
 ## Structure
 

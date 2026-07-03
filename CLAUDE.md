@@ -25,7 +25,7 @@ xcodebuild -project Chatter.xcodeproj -scheme Chatter \
 xcodebuild -project Chatter.xcodeproj -scheme Chatter -destination 'platform=macOS' build
 ```
 
-There is no test target. Builds run unsigned (`CODE_SIGN_IDENTITY: "-"`, empty `DEVELOPMENT_TEAM`); CloudKit sync silently falls back to a local store without a signing team.
+There is no test target. Signing is automatic with the team from `project.yml`; entitlements are per-platform files (`Chatter/Chatter-iOS.entitlements`, `Chatter/Chatter-macOS.entitlements` — the APNs entitlement key differs between the platforms, and only macOS carries the sandbox key). TestFlight release: bump `CURRENT_PROJECT_VERSION` in `project.yml`, `./generate.sh`, archive with `xcodebuild ... archive -allowProvisioningUpdates`, upload via Xcode Organizer.
 
 ## Architecture
 
@@ -33,7 +33,7 @@ The data flow for a chat turn: `ComposerView` → `ChatViewModel` → `ChatEngin
 
 - **`AppEnvironment`** (`@MainActor @Observable`, injected via SwiftUI environment) owns the three shared services — `OllamaService`, `MCPConnectionManager`, `ChatEngine` — plus cross-view UI state (selected session, cached model list, API-key presence).
 - **`ChatEngine`** drives one assistant turn including the agentic tool loop: stream the response → if the model requested tools, execute them via MCP, append `tool` messages, and stream again — up to 6 iterations. Streaming writes into a live SwiftData `Message` with `isStreaming = true`; token deltas are **buffered and flushed at ~12 Hz** because mutating the `@Model` per token re-renders (and re-parses Markdown for) the whole message and stalls the main thread. Preserve this batching when touching the streaming path.
-- **`MCPConnectionManager`** owns live MCP `Client` sessions and a **namespaced tool registry** (`serverName.toolName`) so tools from different servers can't collide; `ChatEngine` calls tools by namespaced name. Transports: Streamable HTTP + legacy SSE (`LegacySSEClientTransport`) on all platforms; stdio subprocesses on macOS only (`#if os(macOS)` — this is why the macOS sandbox is disabled in `Chatter.entitlements`).
+- **`MCPConnectionManager`** owns live MCP `Client` sessions and a **namespaced tool registry** (`serverName.toolName`) so tools from different servers can't collide; `ChatEngine` calls tools by namespaced name. Transports: Streamable HTTP + legacy SSE (`LegacySSEClientTransport`) on all platforms; stdio subprocesses on macOS only (`#if os(macOS)` — this is why the macOS sandbox is disabled in `Chatter-macOS.entitlements`).
 - **`OllamaService`** streams NDJSON from Ollama Cloud `/api/chat` (deltas, thinking traces, tool calls). The API key lives in the Keychain via `KeychainService` (iCloud-synced), never in SwiftData or UserDefaults.
 - **Services are behind protocols** (`Services/Protocols/`): `OllamaServiceProtocol`, `MCPClientProtocol` — `ChatEngine` and views depend on the protocols.
 
