@@ -11,6 +11,7 @@ struct AgentEditorView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \MCPServerConfig.name) private var servers: [MCPServerConfig]
+    @Query(sort: \KnowledgeBundle.name) private var knowledgeBundles: [KnowledgeBundle]
 
     @State private var name = ""
     @State private var systemPrompt = ""
@@ -19,6 +20,7 @@ struct AgentEditorView: View {
     @State private var iconSymbol = "sparkles"
     @State private var colorHex = "6C5CE7"
     @State private var selectedServerIDs: Set<UUID> = []
+    @State private var selectedBundleIDs: Set<UUID> = []
 
     private let icons = ["sparkles", "brain", "bolt.fill", "wand.and.stars", "cpu",
                          "message.fill", "book.fill", "chevron.left.forwardslash.chevron.right",
@@ -71,10 +73,26 @@ struct AgentEditorView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 ForEach(servers) { server in
-                    Toggle(isOn: binding(for: server.id)) {
+                    Toggle(isOn: membership(of: server.id, in: $selectedServerIDs)) {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(server.name)
                             Text(server.transport.label)
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+
+            Section("Knowledge") {
+                if knowledgeBundles.isEmpty {
+                    Text("No knowledge bundles yet. Add some from the sidebar.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                ForEach(knowledgeBundles) { bundle in
+                    Toggle(isOn: membership(of: bundle.id, in: $selectedBundleIDs)) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(bundle.name)
+                            Text("\(bundle.conceptCount) concepts")
                                 .font(.caption2).foregroundStyle(.secondary)
                         }
                     }
@@ -133,11 +151,11 @@ struct AgentEditorView: View {
         .padding(.vertical, 4)
     }
 
-    private func binding(for id: UUID) -> Binding<Bool> {
+    private func membership(of id: UUID, in set: Binding<Set<UUID>>) -> Binding<Bool> {
         Binding(
-            get: { selectedServerIDs.contains(id) },
+            get: { set.wrappedValue.contains(id) },
             set: { on in
-                if on { selectedServerIDs.insert(id) } else { selectedServerIDs.remove(id) }
+                if on { set.wrappedValue.insert(id) } else { set.wrappedValue.remove(id) }
             }
         )
     }
@@ -154,6 +172,7 @@ struct AgentEditorView: View {
         iconSymbol = agent.iconSymbol
         colorHex = agent.colorHex
         selectedServerIDs = Set(agent.mcpServerIDs)
+        selectedBundleIDs = Set(agent.knowledgeBundleIDs)
     }
 
     private func save() {
@@ -165,6 +184,7 @@ struct AgentEditorView: View {
         target.iconSymbol = iconSymbol
         target.colorHex = colorHex
         target.mcpServerIDs = Array(selectedServerIDs)
+        target.knowledgeBundleIDs = Array(selectedBundleIDs)
         if agent == nil {
             context.insert(target)
         }

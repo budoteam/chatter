@@ -7,14 +7,19 @@ struct SidebarView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.modelContext) private var context
     @Query(sort: \Agent.createdAt) private var agents: [Agent]
+    @Query(sort: \KnowledgeBundle.name) private var knowledgeBundles: [KnowledgeBundle]
     @Query(sort: \ChatSession.updatedAt, order: .reverse) private var sessions: [ChatSession]
 
     @State private var editingAgent: Agent?
     @State private var showingNewAgent = false
+    @State private var openBundle: KnowledgeBundle?
+    @State private var showingKnowledgeImporter = false
+    @State private var knowledgeImportReport: String?
 
     var body: some View {
         List(selection: selectionBinding) {
             agentsSection
+            knowledgeSection
             sessionsSection
         }
         .listStyle(.sidebar)
@@ -42,6 +47,26 @@ struct SidebarView: View {
                 #if os(macOS)
                 .frame(minWidth: 500, minHeight: 620)
                 #endif
+        }
+        .sheet(item: $openBundle) { bundle in
+            KnowledgeBundleView(bundle: bundle)
+        }
+        .fileImporter(
+            isPresented: $showingKnowledgeImporter,
+            allowedContentTypes: [.folder]
+        ) { result in
+            handleKnowledgeImport(result)
+        }
+        .alert(
+            "Knowledge Import",
+            isPresented: Binding(
+                get: { knowledgeImportReport != nil },
+                set: { if !$0 { knowledgeImportReport = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(knowledgeImportReport ?? "")
         }
     }
 
@@ -114,6 +139,60 @@ struct SidebarView: View {
         }
     }
 
+    // MARK: - Knowledge
+
+    private var knowledgeSection: some View {
+        Section {
+            ForEach(knowledgeBundles) { bundle in
+                Button { openBundle = bundle } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "books.vertical.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Theme.accent)
+                            .frame(width: 26, height: 26)
+                            .background(Theme.accent.opacity(0.12), in: Circle())
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(bundle.name)
+                                .font(.subheadline.weight(.medium))
+                                .lineLimit(1)
+                            Text("\(bundle.conceptCount) concepts")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .contextMenu {
+                    Button("Open") { openBundle = bundle }
+                    Divider()
+                    Button("Delete", role: .destructive) { delete(bundle) }
+                }
+            }
+
+            Menu {
+                Button("New Bundle") { createBundle() }
+                Button("Import OKF Folder…") { showingKnowledgeImporter = true }
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(Theme.accent)
+                        .frame(width: 26, height: 26)
+                        .background(Theme.accent.opacity(0.12), in: Circle())
+                    Text("Add Knowledge")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        } header: {
+            sectionHeader("Knowledge")
+        }
+    }
+
     // MARK: - Sessions
 
     private var sessionsSection: some View {
@@ -153,7 +232,7 @@ struct SidebarView: View {
     }
 
     private var defaultAgent: Agent? {
-        env.selectedSession?.agent ?? agents.first(where: \.isDefault) ?? agents.first
+        env.selectedSession?.agent ?? SessionFactory.defaultAgent(in: agents)
     }
 
     // MARK: - Actions
@@ -172,6 +251,39 @@ struct SidebarView: View {
     private func delete(_ agent: Agent) {
         context.delete(agent)
         try? context.save()
+    }
+
+    private func createBundle() {
+        let bundle = KnowledgeBundle(name: "New Bundle")
+        context.insert(bundle)
+        try? context.save()
+        openBundle = bundle
+    }
+
+    private func delete(_ bundle: KnowledgeBundle) {
+        if openBundle == bundle { openBundle = nil }
+        // Scrub the soft references so agents don't keep dangling bundle IDs
+        // (they'd silently lose their knowledge tools with no UI trace).
+        let allAgents = (try? context.fetch(FetchDescriptor<Agent>())) ?? []
+        for agent in allAgents where agent.knowledgeBundleIDs.contains(bundle.id) {
+            agent.knowledgeBundleIDs.removeAll { $0 == bundle.id }
+        }
+        context.delete(bundle)
+        try? context.save()
+    }
+
+    private func handleKnowledgeImport(_ result: Result<URL, Error>) {
+        switch result {
+        case .success(let url):
+            do {
+                let report = try KnowledgeTransfer.importBundle(from: url, into: context)
+                knowledgeImportReport = report.alertText
+            } catch {
+                knowledgeImportReport = "Import failed: \(error.localizedDescription)"
+            }
+        case .failure(let error):
+            knowledgeImportReport = "Import failed: \(error.localizedDescription)"
+        }
     }
 }
 

@@ -16,6 +16,8 @@ final class Agent {
     var colorHex: String = "6C5CE7"
     /// IDs of the `MCPServerConfig`s this agent is allowed to use.
     var mcpServerIDs: [UUID] = []
+    /// IDs of the `KnowledgeBundle`s this agent can consult.
+    var knowledgeBundleIDs: [UUID] = []
     var createdAt: Date = Date()
     var isDefault: Bool = false
 
@@ -30,6 +32,7 @@ final class Agent {
         iconSymbol: String = "sparkles",
         colorHex: String = "6C5CE7",
         mcpServerIDs: [UUID] = [],
+        knowledgeBundleIDs: [UUID] = [],
         isDefault: Bool = false
     ) {
         self.id = UUID()
@@ -40,6 +43,7 @@ final class Agent {
         self.iconSymbol = iconSymbol
         self.colorHex = colorHex
         self.mcpServerIDs = mcpServerIDs
+        self.knowledgeBundleIDs = knowledgeBundleIDs
         self.createdAt = Date()
         self.isDefault = isDefault
     }

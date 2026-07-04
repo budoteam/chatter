@@ -8,6 +8,7 @@ import SwiftUI
 final class AppEnvironment {
     let ollama: OllamaServiceProtocol
     let mcp: MCPConnectionManager
+    let knowledge: KnowledgeToolProvider
     let engine: ChatEngine
 
     var selectedSession: ChatSession?
@@ -24,9 +25,11 @@ final class AppEnvironment {
     init() {
         let ollama = OllamaService()
         let mcp = MCPConnectionManager()
+        let knowledge = KnowledgeToolProvider()
         self.ollama = ollama
         self.mcp = mcp
-        self.engine = ChatEngine(ollama: ollama, mcp: mcp)
+        self.knowledge = knowledge
+        self.engine = ChatEngine(ollama: ollama, mcp: mcp, knowledge: knowledge)
     }
 
     func requestNewSession() { newSessionRequestID = UUID() }
