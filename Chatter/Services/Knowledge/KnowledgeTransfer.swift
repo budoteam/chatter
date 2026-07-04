@@ -10,14 +10,17 @@ enum KnowledgeTransfer {
         var bundleName: String = ""
         var imported: Int = 0
         var skipped: Int = 0
-        /// What a "skipped" item is, singular — folder import skips
-        /// non-markdown files, PDF import skips text-less scans.
-        var skippedNoun: String = "non-markdown file"
+        /// Singular / plural forms of a skipped item — folder import skips
+        /// non-markdown files, PDF import skips text-less scans. Stored as a
+        /// pair so multi-word nouns pluralize the right word.
+        var skippedNoun = (singular: "non-markdown file", plural: "non-markdown files")
         var warnings: [String] = []
 
         var summary: String {
             var text = "Imported \(imported) document\(imported == 1 ? "" : "s") into “\(bundleName)”."
-            if skipped > 0 { text += " Skipped \(skipped) \(skippedNoun)\(skipped == 1 ? "" : "s")." }
+            if skipped > 0 {
+                text += " Skipped \(skipped) \(skipped == 1 ? skippedNoun.singular : skippedNoun.plural)."
+            }
             return text
         }
 

@@ -15,3 +15,26 @@ protocol OllamaServiceProtocol {
         temperature: Double
     ) -> AsyncThrowingStream<OllamaChatChunk, Error>
 }
+
+extension OllamaServiceProtocol {
+    /// One-shot completion: runs a tool-less chat and returns the full
+    /// assistant text, dropping `.thinking`/`.toolCalls` chunks. Bound to
+    /// every conformer (real service and mocks) so features that don't need
+    /// streaming don't re-implement the collect loop.
+    ///
+    /// The stream ends normally (no throw) when the consuming task is
+    /// cancelled, so callers that care must check `Task.isCancelled` after.
+    func complete(
+        model: String,
+        messages: [OllamaChatMessage],
+        temperature: Double = 0
+    ) async throws -> String {
+        var text = ""
+        for try await chunk in streamChat(
+            model: model, messages: messages, tools: [], temperature: temperature
+        ) {
+            if case .delta(let piece) = chunk { text += piece }
+        }
+        return text
+    }
+}

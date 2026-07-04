@@ -16,7 +16,8 @@ final class KnowledgeToolProvider {
     /// Keeps the system-prompt overview from crowding out the conversation.
     private static let overviewCharacterLimit = 3_000
     /// Keeps a single tool result within a sane share of the context window.
-    private static let readCharacterLimit = 16_000
+    /// Internal so the PDF importer can size concept bodies to fit under it.
+    static let readCharacterLimit = 16_000
 
     enum ToolError: LocalizedError {
         case unknownTool(String)

@@ -54,6 +54,8 @@ struct PDFImportSheet: View {
         }
         .interactiveDismissDisabled(isRunning)
         .onAppear(perform: seedModel)
+        // Models may load after the sheet appears; re-seed while still unset.
+        .onChange(of: env.models.map(\.name)) { seedModel() }
         .onChange(of: job.phase) { _, phase in
             if phase == .finished { onFinish(job.report) }
         }
@@ -102,9 +104,11 @@ struct PDFImportSheet: View {
     private func runningContent(current: Int, total: Int, fileName: String) -> some View {
         Section {
             VStack(alignment: .leading, spacing: 10) {
-                ProgressView(value: Double(current - 1), total: Double(total))
-                Text("Converting \(current) of \(total) — \(fileName)")
-                    .font(.caption).foregroundStyle(.secondary)
+                // Indeterminate: converting one PDF is the slow step, and a
+                // determinate bar over the file count would sit still for it.
+                ProgressView("Converting \(current) of \(total)")
+                Text(fileName)
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 Text("Imported so far: \(job.report.imported) concepts")
                     .font(.caption2).foregroundStyle(.tertiary)
             }
@@ -116,12 +120,9 @@ struct PDFImportSheet: View {
 
     private func seedModel() {
         guard selectedModel.isEmpty else { return }
-        let defaultAgent = agents.first(where: \.isDefault) ?? agents.first
-        if let model = defaultAgent?.modelId, !model.isEmpty {
-            selectedModel = model
-        } else {
-            selectedModel = env.models.first?.name ?? ""
-        }
+        selectedModel = SessionFactory.defaultModel(
+            agent: SessionFactory.defaultAgent(in: agents), models: env.models
+        )
     }
 
     private func start() {

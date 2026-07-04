@@ -8,12 +8,23 @@ enum SessionFactory {
     /// (or the first available model as a fallback).
     @MainActor
     static func create(in context: ModelContext, agent: Agent?, models: [OllamaModel]) -> ChatSession {
-        let agentModel = (agent?.modelId).flatMap { $0.isEmpty ? nil : $0 }
-        let model = agentModel ?? models.first?.name ?? ""
-        let session = ChatSession(agent: agent, modelId: model)
+        let session = ChatSession(agent: agent, modelId: defaultModel(agent: agent, models: models))
         context.insert(session)
         try? context.save()
         return session
+    }
+
+    /// The model to use by default: the agent's model, else the first
+    /// available model, else empty. One rule, shared by chat creation and the
+    /// PDF import sheet.
+    static func defaultModel(agent: Agent?, models: [OllamaModel]) -> String {
+        let agentModel = (agent?.modelId).flatMap { $0.isEmpty ? nil : $0 }
+        return agentModel ?? models.first?.name ?? ""
+    }
+
+    /// The default agent: the one flagged default, else the first.
+    static func defaultAgent(in agents: [Agent]) -> Agent? {
+        agents.first(where: \.isDefault) ?? agents.first
     }
 }
 

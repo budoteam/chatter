@@ -15,14 +15,15 @@ enum PDFKnowledgeImporter {
     static let chunkMaxChars = 20_000
     /// Hard cap per PDF (~120k chars); the rest is truncated with a warning.
     static let maxChunksPerPDF = 6
-    /// Per-concept body cap — knowledge__read truncates at 16k, stay under it.
-    static let conceptMarkdownCap = 12_000
+    /// Per-concept body cap, derived from the read tool's limit (with margin)
+    /// so a concept never gets truncated a second time at read time.
+    static let conceptMarkdownCap = KnowledgeToolProvider.readCharacterLimit - 4_000
     /// Extracted text shorter than this counts as "no text layer" (scan).
     static let minimumTextLength = 20
 
     // MARK: - Extraction (PDFKit, no OCR)
 
-    struct ExtractedPDF {
+    struct ExtractedPDF: Sendable {
         var fileName: String
         /// All pages joined with blank lines, trimmed.
         var text: String
@@ -183,11 +184,12 @@ enum PDFKnowledgeImporter {
     }
 
     /// Resolves collisions with the `x`, `x-2`, `x-3`… scheme and keeps
-    /// generated paths off the reserved OKF filenames (`index`, `log`).
+    /// generated paths off the reserved OKF filenames — reusing the single
+    /// reserved-name rule so new reserved names are picked up automatically.
     static func uniquePath(_ desired: String, taken: Set<String>) -> String {
         var base = desired
         let lastComponent = base.split(separator: "/").last.map(String.init) ?? base
-        if lastComponent == "index" || lastComponent == "log" {
+        if KnowledgeDocKind.forFileName(lastComponent + ".md") != .concept {
             base += "-doc"
         }
         guard taken.contains(base) else { return base }
@@ -198,29 +200,42 @@ enum PDFKnowledgeImporter {
 
     /// Splits text into chunks of at most `maxChars`, preferring paragraph
     /// boundaries; paragraphs longer than the limit are hard-split. No input
-    /// text is lost (blank-line runs between paragraphs may collapse).
+    /// text is lost (blank-line runs between paragraphs may collapse). Runs in
+    /// a single linear pass: sizes are tracked with `Int` counters and long
+    /// paragraphs are sliced by index rather than repeatedly re-counted/copied.
     static func splitIntoChunks(_ text: String, maxChars: Int) -> [String] {
         guard text.count > maxChars else { return [text] }
+        // Break oversized paragraphs into ≤ maxChars pieces first, by index.
+        var pieces: [Substring] = []
+        for paragraph in text.components(separatedBy: "\n\n") {
+            var start = paragraph.startIndex
+            while start < paragraph.endIndex {
+                let end = paragraph.index(start, offsetBy: maxChars, limitedBy: paragraph.endIndex)
+                    ?? paragraph.endIndex
+                pieces.append(paragraph[start..<end])
+                start = end
+            }
+        }
+
+        // Greedily pack pieces (all ≤ maxChars) using running Int sizes.
         var chunks: [String] = []
         var current = ""
-
-        for paragraph in text.components(separatedBy: "\n\n") {
-            var piece = paragraph
-            while piece.count > maxChars {
-                if !current.isEmpty {
-                    chunks.append(current)
-                    current = ""
-                }
-                chunks.append(String(piece.prefix(maxChars)))
-                piece = String(piece.dropFirst(maxChars))
-            }
-            guard !piece.isEmpty else { continue }
-            let candidate = current.isEmpty ? piece : current + "\n\n" + piece
-            if candidate.count > maxChars {
+        var currentCount = 0
+        for piece in pieces {
+            let pieceCount = piece.count
+            if pieceCount == 0 { continue }
+            let separator = current.isEmpty ? 0 : 2  // "\n\n"
+            if currentCount + separator + pieceCount > maxChars, !current.isEmpty {
                 chunks.append(current)
-                current = piece
+                current = ""
+                currentCount = 0
+            }
+            if current.isEmpty {
+                current = String(piece)
+                currentCount = pieceCount
             } else {
-                current = candidate
+                current += "\n\n" + piece
+                currentCount += 2 + pieceCount
             }
         }
         if !current.isEmpty { chunks.append(current) }
@@ -257,8 +272,9 @@ enum PDFKnowledgeImporter {
             concept.summary = llm.description
             concept.tags = llm.tags ?? []
             concept.timestampRaw = KnowledgeConcept.currentTimestampString()
-            // Provenance: which file this concept was generated from.
-            concept.resource = "file://\(pdf.fileName)"
+            // Provenance: the source file name (a plain name, not a fabricated
+            // file:// URI that wouldn't be a valid resource URI).
+            concept.resource = pdf.fileName
 
             var body = llm.markdown
             if body.count > conceptMarkdownCap {

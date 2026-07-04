@@ -49,7 +49,7 @@ struct RootView: View {
     }
 
     private func startNewSession() {
-        let agent = env.selectedSession?.agent ?? agents.first(where: \.isDefault) ?? agents.first
+        let agent = env.selectedSession?.agent ?? SessionFactory.defaultAgent(in: agents)
         let session = SessionFactory.create(in: context, agent: agent, models: env.models)
         env.selectedSession = session
     }

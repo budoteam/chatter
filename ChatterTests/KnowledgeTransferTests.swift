@@ -13,6 +13,34 @@ final class KnowledgeTransferTests: XCTestCase {
         return container.mainContext
     }
 
+    func testImportReportPluralizesTheRightWord() {
+        var report = KnowledgeTransfer.ImportReport(
+            bundleName: "Docs",
+            skippedNoun: (singular: "PDF without extractable text",
+                          plural: "PDFs without extractable text")
+        )
+        report.imported = 1
+        report.skipped = 2
+        XCTAssertEqual(
+            report.summary,
+            "Imported 1 document into “Docs”. Skipped 2 PDFs without extractable text."
+        )
+
+        report.imported = 3
+        report.skipped = 1
+        XCTAssertEqual(
+            report.summary,
+            "Imported 3 documents into “Docs”. Skipped 1 PDF without extractable text."
+        )
+    }
+
+    func testDefaultImportReportSkipNounUnchanged() {
+        var report = KnowledgeTransfer.ImportReport(bundleName: "B")
+        report.imported = 2
+        report.skipped = 2
+        XCTAssertEqual(report.summary, "Imported 2 documents into “B”. Skipped 2 non-markdown files.")
+    }
+
     func testConceptFileRoundTripsThroughTheModel() throws {
         let context = try makeContext()
         let bundle = KnowledgeBundle(name: "Test")

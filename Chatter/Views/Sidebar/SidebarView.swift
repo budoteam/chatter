@@ -232,7 +232,7 @@ struct SidebarView: View {
     }
 
     private var defaultAgent: Agent? {
-        env.selectedSession?.agent ?? agents.first(where: \.isDefault) ?? agents.first
+        env.selectedSession?.agent ?? SessionFactory.defaultAgent(in: agents)
     }
 
     // MARK: - Actions

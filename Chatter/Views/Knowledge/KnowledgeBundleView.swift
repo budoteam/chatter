@@ -16,7 +16,16 @@ struct KnowledgeBundleView: View {
     @State private var exportDocument: OKFBundleDocument?
     @State private var importReport: String?
     @State private var showPDFImporter = false
-    @State private var pdfImportURLs: [URL]?
+    @State private var pdfImportRequest: PDFImportRequest?
+    /// Held until the PDF sheet has fully dismissed, then shown — presenting
+    /// the alert in the same transaction as the dismiss can drop it on iOS.
+    @State private var pendingPDFReport: KnowledgeTransfer.ImportReport?
+
+    /// Identifiable wrapper so the PDF sheet uses `.sheet(item:)`.
+    private struct PDFImportRequest: Identifiable {
+        let id = UUID()
+        let urls: [URL]
+    }
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -119,20 +128,15 @@ struct KnowledgeBundleView: View {
         ) { result in
             switch result {
             case .success(let urls):
-                pdfImportURLs = urls
+                pdfImportRequest = PDFImportRequest(urls: urls)
             case .failure(let error):
                 importReport = "Import failed: \(error.localizedDescription)"
             }
         }
-        .sheet(isPresented: Binding(
-            get: { pdfImportURLs != nil },
-            set: { if !$0 { pdfImportURLs = nil } }
-        )) {
-            PDFImportSheet(urls: pdfImportURLs ?? [], bundle: bundle) { report in
-                pdfImportURLs = nil
-                if report.imported > 0 || report.skipped > 0 || !report.warnings.isEmpty {
-                    importReport = report.alertText
-                }
+        .sheet(item: $pdfImportRequest, onDismiss: showPendingPDFReport) { request in
+            PDFImportSheet(urls: request.urls, bundle: bundle) { report in
+                pendingPDFReport = report
+                pdfImportRequest = nil  // dismiss; report shown in onDismiss
             }
         }
         #if os(macOS)
@@ -244,6 +248,15 @@ struct KnowledgeBundleView: View {
             }
         case .failure(let error):
             importReport = "Import failed: \(error.localizedDescription)"
+        }
+    }
+
+    /// Shown after the PDF sheet has fully dismissed (see `pendingPDFReport`).
+    private func showPendingPDFReport() {
+        guard let report = pendingPDFReport else { return }
+        pendingPDFReport = nil
+        if report.imported > 0 || report.skipped > 0 || !report.warnings.isEmpty {
+            importReport = report.alertText
         }
     }
 }
