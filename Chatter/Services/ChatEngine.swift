@@ -8,11 +8,13 @@ import SwiftData
 final class ChatEngine {
     private let ollama: OllamaServiceProtocol
     private let mcp: MCPConnectionManager
+    private let knowledge: KnowledgeToolProvider
     private let maxToolIterations = 6
 
-    init(ollama: OllamaServiceProtocol, mcp: MCPConnectionManager) {
+    init(ollama: OllamaServiceProtocol, mcp: MCPConnectionManager, knowledge: KnowledgeToolProvider) {
         self.ollama = ollama
         self.mcp = mcp
+        self.knowledge = knowledge
     }
 
     enum EngineError: LocalizedError {
@@ -38,13 +40,16 @@ final class ChatEngine {
 
         // Tool schemas for this agent's allowed servers.
         let resolved = mcp.tools(forServerIDs: agent?.mcpServerIDs ?? [])
-        let tools = resolved.map {
+        var tools = resolved.map {
             OllamaTool(function: .init(
                 name: $0.namespacedName,
                 description: $0.toolDescription,
                 parameters: $0.parameters
             ))
         }
+        // Built-in knowledge tools for this agent's assigned bundles.
+        let knowledgeBundleIDs = agent?.knowledgeBundleIDs ?? []
+        tools += knowledge.tools(bundleIDs: knowledgeBundleIDs, context: context)
 
         var iteration = 0
         while iteration < maxToolIterations {
@@ -54,7 +59,7 @@ final class ChatEngine {
             // Rebuilt every iteration, so the timestamp stays current across
             // long tool loops.
             var msgs: [OllamaChatMessage] = [
-                OllamaChatMessage(role: "system", content: Self.systemPrompt(for: agent))
+                OllamaChatMessage(role: "system", content: systemPrompt(for: agent, context: context))
             ]
             msgs.append(contentsOf: session.orderedMessages.map(Self.toOllama))
 
@@ -142,7 +147,14 @@ final class ChatEngine {
                 let argsJSON = call.function.arguments.jsonString
                 let result: String
                 do {
-                    result = try await mcp.callTool(namespacedName: name, argumentsJSON: argsJSON)
+                    if knowledge.canHandle(name) {
+                        result = try knowledge.call(
+                            namespacedName: name, argumentsJSON: argsJSON,
+                            bundleIDs: knowledgeBundleIDs, context: context
+                        )
+                    } else {
+                        result = try await mcp.callTool(namespacedName: name, argumentsJSON: argsJSON)
+                    }
                 } catch {
                     result = "Tool error: \(error.localizedDescription)"
                 }
@@ -171,11 +183,20 @@ final class ChatEngine {
         return formatter
     }()
 
-    /// The agent's system prompt, always ending with the current date & time.
-    private static func systemPrompt(for agent: Agent?) -> String {
-        let timestamp = "Current Date and Time: \(timestampFormatter.string(from: Date()))"
+    /// The agent's system prompt plus its knowledge-base overview, always
+    /// ending with the current date & time.
+    private func systemPrompt(for agent: Agent?, context: ModelContext) -> String {
+        let timestamp = "Current Date and Time: \(Self.timestampFormatter.string(from: Date()))"
+        var parts: [String] = []
         let prompt = agent?.systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return prompt.isEmpty ? timestamp : prompt + "\n\n" + timestamp
+        if !prompt.isEmpty { parts.append(prompt) }
+        if let overview = knowledge.systemPromptSection(
+            bundleIDs: agent?.knowledgeBundleIDs ?? [], context: context
+        ) {
+            parts.append(overview)
+        }
+        parts.append(timestamp)
+        return parts.joined(separator: "\n\n")
     }
 
     private func resolveModel(agent: Agent?, session: ChatSession) -> String {

@@ -13,6 +13,8 @@ enum Persistence {
         ChatSession.self,
         Message.self,
         MCPServerConfig.self,
+        KnowledgeBundle.self,
+        KnowledgeConcept.self,
     ])
 
     static func makeContainer() -> ModelContainer {
