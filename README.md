@@ -1,14 +1,17 @@
 # Chatter
 
-Multiplatform (iOS / iPadOS / macOS) LLM chat app powered by **Ollama Cloud**, with
+Multiplatform (iOS / iPadOS 17+, macOS 14+) LLM chat app powered by **Ollama Cloud**, with
 **MCP tool** support and user-defined **Agents**. UI inspired by the Google Gemini app.
 
 ## Features
 
-- **Ollama Cloud** chat with live token streaming (`/api/chat`, NDJSON).
-- **Agents**: each has its own model, system prompt, temperature, icon/color, and set of MCP servers.
+- **Ollama Cloud** chat with live token streaming (`/api/chat`, NDJSON), including thinking traces.
+- **Agents**: each has its own model, system prompt, temperature, icon/color, and set of
+  MCP servers and knowledge bundles.
 - **MCP tools**: Streamable HTTP + SSE on all platforms; stdio (local subprocess) on macOS.
-  Static auth header per server. The model's tool calls are run and fed back automatically (agentic loop).
+  Static auth header per server. The model's tool calls are run and fed back automatically
+  (agentic loop) — up to 42 tool rounds, after which one final round without tools guarantees
+  a text answer.
 - **Session history** with SwiftData, synced across devices via **CloudKit** (when the iCloud
   capability is provisioned; falls back to a local store otherwise).
 - **Knowledge base** in the [Open Knowledge Format (OKF)](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md):
@@ -26,6 +29,7 @@ Multiplatform (iOS / iPadOS / macOS) LLM chat app powered by **Ollama Cloud**, w
 
 ## Requirements
 
+- iOS / iPadOS 17+ or macOS 14+ at runtime.
 - Xcode 16+ (built with Xcode 26), Swift 5 language mode.
 - An **Ollama Cloud API key** (ollama.com → Settings → API keys), entered in the app's Settings.
   Stored in the keychain (synced via iCloud Keychain).
@@ -52,6 +56,9 @@ xcodebuild -project Chatter.xcodeproj -scheme Chatter \
 
 # macOS
 xcodebuild -project Chatter.xcodeproj -scheme Chatter -destination 'platform=macOS' build
+
+# Tests (OKF codec, knowledge transfer, PDF importer)
+xcodebuild -project Chatter.xcodeproj -scheme Chatter -destination 'platform=macOS' test
 
 # Or just open it
 open Chatter.xcodeproj
@@ -92,11 +99,17 @@ Chatter/
   ViewModels/    ChatViewModel
   Views/         RootView, Sidebar/, Chat/, Agents/, Knowledge/, Settings/, Components/
   DesignSystem/  Theme
-ChatterTests/    OKFCodec + KnowledgeTransfer round-trip tests
+ChatterTests/    OKFCodec, KnowledgeTransfer + PDFKnowledgeImporter tests
 ```
 
 ### Knowledge base notes
 
+- Usage: sidebar → **Knowledge → Add Knowledge** creates a bundle (or imports an OKF folder);
+  opening a bundle shows its document tree plus action rows for **New Concept**,
+  **Import PDFs…**, **Import OKF Folder (Merge)…**, and **Export Bundle…** (⌘N adds a
+  concept, swipe or right-click deletes one). Assign bundles to an agent in its editor.
+- The model reads concepts through `knowledge__list` / `knowledge__read`; reads are capped
+  at 16 000 characters (with a truncation note), the system-prompt overview at 3 000.
 - Export writes plain folders (no zip yet — that would need a ZIPFoundation dependency).
 - Round-trips are information-lossless: unknown frontmatter keys, block scalars, and
   `index.md`/`log.md` files are preserved verbatim. Known keys are re-emitted in the
