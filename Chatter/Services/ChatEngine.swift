@@ -3,13 +3,15 @@ import SwiftData
 
 /// Drives a single assistant turn, including the MCP tool loop:
 /// stream → if the model requested tools, run them and feed results back →
-/// stream again, until the model answers or we hit the iteration cap.
+/// stream again, until the model answers. After `maxToolIterations` tool
+/// rounds a last round is streamed without offering tools, so the turn
+/// always ends in a text answer instead of dropping silently.
 @MainActor
 final class ChatEngine {
     private let ollama: OllamaServiceProtocol
     private let mcp: MCPConnectionManager
     private let knowledge: KnowledgeToolProvider
-    private let maxToolIterations = 6
+    private let maxToolIterations = 42
 
     init(ollama: OllamaServiceProtocol, mcp: MCPConnectionManager, knowledge: KnowledgeToolProvider) {
         self.ollama = ollama
@@ -63,8 +65,12 @@ final class ChatEngine {
         )
 
         var iteration = 0
-        while iteration < maxToolIterations {
+        while true {
             iteration += 1
+            // Tool budget exhausted → withhold the tools so the model has to
+            // answer in text (summarizing how far it got) instead of the turn
+            // ending without any reply.
+            let finalRound = iteration > maxToolIterations
 
             // Build the request from the persisted history (system prompt first).
             // Rebuilt every iteration, so the timestamp stays current across
@@ -110,7 +116,7 @@ final class ChatEngine {
 
             do {
                 for try await chunk in ollama.streamChat(
-                    model: model, messages: msgs, tools: tools,
+                    model: model, messages: msgs, tools: finalRound ? [] : tools,
                     temperature: agent?.temperature ?? 0.7
                 ) {
                     switch chunk {
@@ -142,8 +148,10 @@ final class ChatEngine {
             }
             assistant.isStreaming = false
 
-            // No tools requested → this is the final answer.
-            if toolCalls.isEmpty {
+            // No tools requested → this is the final answer. Same on the
+            // forced final round: no tools were offered, and any calls a model
+            // emits anyway would have nobody left to answer them.
+            if toolCalls.isEmpty || finalRound {
                 maybeAutoTitle(session)
                 session.updatedAt = .now
                 try? context.save()
@@ -183,10 +191,6 @@ final class ChatEngine {
             try? context.save()
             // Loop: model gets another turn with the tool results in history.
         }
-
-        maybeAutoTitle(session)
-        session.updatedAt = .now
-        try? context.save()
     }
 
     // MARK: - Helpers
