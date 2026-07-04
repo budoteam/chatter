@@ -1,6 +1,11 @@
 import SwiftUI
 import SwiftData
 import PhotosUI
+#if os(macOS)
+import AppKit
+#else
+import UIKit
+#endif
 
 /// Bottom input card: multiline text on top, agent selector + send button in a
 /// control row inside the same rounded surface (Gemini-style). The model is
@@ -28,18 +33,34 @@ struct ComposerView: View {
                 .focused($focused)
                 .padding(.horizontal, 4)
                 #if os(macOS)
-                // Return sends; Shift+Return inserts a newline. onKeyPress runs
-                // before the field's own Return handling: we swallow plain
-                // Return (send instead) and let Shift+Return fall through so the
-                // multiline field inserts a line break.
+                // Return sends; Shift+Return inserts a line break at the cursor.
+                // Plain .ignored doesn't work for Shift+Return (the field editor
+                // treats it as submit/select-all instead of a newline), so we
+                // forward AppKit's explicit "insert newline" action.
                 .onKeyPress(phases: .down) { press in
                     guard press.key == .return else { return .ignored }
-                    if press.modifiers.contains(.shift) { return .ignored }
-                    onSend()
+                    if press.modifiers.contains(.shift) {
+                        NSApp.sendAction(
+                            #selector(NSTextView.insertNewlineIgnoringFieldEditor(_:)),
+                            to: nil, from: nil
+                        )
+                        return .handled
+                    }
+                    performSend()
                     return .handled
                 }
                 #else
-                .onSubmit(onSend)
+                // Software-keyboard Return submits (onSubmit); on hardware
+                // keyboards (iPad) Shift+Return inserts a line break instead
+                // of also submitting.
+                .onKeyPress(phases: .down) { press in
+                    guard press.key == .return, press.modifiers.contains(.shift) else {
+                        return .ignored
+                    }
+                    (UIResponder.currentFirst as? UIKeyInput)?.insertText("\n")
+                    return .handled
+                }
+                .onSubmit(performSend)
                 #endif
 
             HStack(spacing: 8) {
@@ -183,8 +204,16 @@ struct ComposerView: View {
 
     // MARK: - Send / stop
 
+    /// Sends (or stops) and keeps the input field focused so the user can
+    /// type the next message right away — button clicks (macOS) and the send
+    /// itself would otherwise drop focus.
+    private func performSend() {
+        onSend()
+        Task { @MainActor in focused = true }
+    }
+
     private var sendButton: some View {
-        Button(action: onSend) {
+        Button(action: performSend) {
             Image(systemName: viewModel.isSending ? "stop.fill" : "arrow.up")
                 .font(.system(size: 14, weight: .bold))
                 .foregroundStyle(.white)
@@ -208,3 +237,22 @@ struct ComposerView: View {
         }
     }
 }
+
+#if os(iOS)
+private extension UIResponder {
+    @MainActor static weak var _currentFirst: UIResponder?
+
+    /// The current first responder, found by bouncing an action down the
+    /// responder chain (UIKit has no public accessor). Used to insert a line
+    /// break at the cursor for hardware-keyboard Shift+Return.
+    @MainActor static var currentFirst: UIResponder? {
+        _currentFirst = nil
+        UIApplication.shared.sendAction(#selector(captureFirst), to: nil, from: nil, for: nil)
+        return _currentFirst
+    }
+
+    @MainActor @objc private func captureFirst() {
+        UIResponder._currentFirst = self
+    }
+}
+#endif
