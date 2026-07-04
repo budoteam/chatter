@@ -20,6 +20,11 @@ struct ComposerView: View {
     @FocusState private var focused: Bool
     @State private var photoItems: [PhotosPickerItem] = []
     @State private var supportsVision = false
+    #if os(iOS)
+    /// Inserting "\n" for Shift+Return also fires the field's onSubmit
+    /// (SwiftUI detects submit via newline insertion); this swallows that one.
+    @State private var suppressNextSubmit = false
+    #endif
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -57,10 +62,21 @@ struct ComposerView: View {
                     guard press.key == .return, press.modifiers.contains(.shift) else {
                         return .ignored
                     }
+                    suppressNextSubmit = true
                     (UIResponder.currentFirst as? UIKeyInput)?.insertText("\n")
+                    // onSubmit fires synchronously from the insertion above;
+                    // clear afterwards in case it didn't, so a later real
+                    // Return isn't swallowed.
+                    Task { @MainActor in suppressNextSubmit = false }
                     return .handled
                 }
-                .onSubmit(performSend)
+                .onSubmit {
+                    if suppressNextSubmit {
+                        suppressNextSubmit = false
+                    } else {
+                        performSend()
+                    }
+                }
                 #endif
 
             HStack(spacing: 8) {
