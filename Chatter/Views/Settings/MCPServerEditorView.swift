@@ -19,13 +19,9 @@ struct MCPServerEditorView: View {
     @State private var enabled = true
     @State private var showingDeleteConfirmation = false
 
-    /// Transports offered on this platform (stdio is macOS only).
+    /// Transports offered here (stdio: unsandboxed macOS only).
     private var availableTransports: [MCPTransportKind] {
-        #if os(macOS)
-        MCPTransportKind.allCases
-        #else
-        [.sse, .http]
-        #endif
+        MCPTransportKind.stdioAvailable ? MCPTransportKind.allCases : [.sse, .http]
     }
 
     var body: some View {

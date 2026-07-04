@@ -17,6 +17,16 @@ enum MCPTransportKind: String, Codable, CaseIterable, Identifiable {
     }
 
     var isRemote: Bool { self == .http || self == .sse }
+
+    /// stdio spawns subprocesses: macOS only, and not possible in sandboxed
+    /// builds (TestFlight/App Store — see Chatter-macOS-Release.entitlements).
+    static var stdioAvailable: Bool {
+        #if os(macOS)
+        ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] == nil
+        #else
+        false
+        #endif
+    }
 }
 
 /// User-configured MCP server. Remote servers use `url` + an optional static

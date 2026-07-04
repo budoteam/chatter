@@ -136,6 +136,9 @@ final class MCPConnectionManager: MCPClientProtocol {
 
         case .stdio:
             #if os(macOS)
+            // Configs may sync in from an unsandboxed Mac; sandboxed builds
+            // (TestFlight/App Store) can't spawn subprocesses.
+            guard MCPTransportKind.stdioAvailable else { throw MCPError.stdioUnsupported }
             return try makeStdioTransport(for: config)
             #else
             throw MCPError.stdioUnsupported
@@ -209,7 +212,7 @@ final class MCPConnectionManager: MCPClientProtocol {
             switch self {
             case .badURL(let s): return "Invalid server URL: \(s)"
             case .badCommand: return "Missing stdio command."
-            case .stdioUnsupported: return "stdio MCP servers are only supported on macOS."
+            case .stdioUnsupported: return "stdio MCP servers need an unsandboxed macOS build (not available in TestFlight/App Store builds)."
             case .toolUnavailable(let name): return "Tool '\(name)' is not available."
             }
         }
