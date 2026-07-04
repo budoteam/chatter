@@ -5,11 +5,16 @@ import SwiftData
 /// Model-mapping round trips: OKF file → `KnowledgeConcept` → OKF file.
 @MainActor
 final class KnowledgeTransferTests: XCTestCase {
+    // ModelContext does not retain its container; a local would deallocate on
+    // return and the first insert would trap inside SwiftData.
+    private var container: ModelContainer?
+
     private func makeContext() throws -> ModelContext {
         let container = try ModelContainer(
             for: KnowledgeBundle.self, KnowledgeConcept.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
+        self.container = container
         return container.mainContext
     }
 

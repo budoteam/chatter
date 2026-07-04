@@ -169,7 +169,8 @@ final class PDFKnowledgeImporterTests: XCTestCase {
         let intro = bundle.concept(atPath: "handbook/intro-2")
         XCTAssertNotNil(intro)
         XCTAssertEqual(intro?.typeName, "guide")
-        XCTAssertEqual(intro?.resource, "file://Handbook.pdf")
+        // Provenance is the plain source file name, not a fabricated file:// URI.
+        XCTAssertEqual(intro?.resource, "Handbook.pdf")
 
         let big = bundle.concept(atPath: "handbook/big")
         XCTAssertNotNil(big)

@@ -102,3 +102,6 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: team.budo.chatter.tests
         GENERATE_INFOPLIST_FILE: YES
+        # XcodeGen emits the iOS bundle layout for TEST_HOST; on macOS the
+        # executable lives in Contents/MacOS, so tests fail to find the host.
+        "TEST_HOST[sdk=macosx*]": "$(BUILT_PRODUCTS_DIR)/Chatter.app/Contents/MacOS/Chatter"
