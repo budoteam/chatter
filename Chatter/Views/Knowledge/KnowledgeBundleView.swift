@@ -29,17 +29,20 @@ struct KnowledgeBundleView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            List {
+            Form {
                 Section("Bundle") {
                     TextField("Name", text: $bundle.name)
                     TextField("Notes", text: $bundle.about, axis: .vertical)
                         .lineLimit(1...4)
                 }
 
-                Section("Documents") {
+                Section {
                     if tree.isEmpty {
-                        Text("No documents yet. Create a concept or import an OKF folder.")
-                            .font(.caption).foregroundStyle(.secondary)
+                        ContentUnavailableView {
+                            Label("No Documents", systemImage: "books.vertical")
+                        } description: {
+                            Text("Create a concept, or import an OKF folder or PDFs.")
+                        }
                     }
                     OutlineGroup(tree, children: \.children) { node in
                         if let concept = node.concept {
@@ -49,18 +52,63 @@ struct KnowledgeBundleView: View {
                             .contextMenu {
                                 Button("Delete", role: .destructive) { delete(concept) }
                             }
+                            .swipeActions(edge: .trailing) {
+                                Button("Delete", role: .destructive) { delete(concept) }
+                            }
                         } else {
-                            Label(node.name, systemImage: "folder")
+                            Label {
+                                Text(node.name)
+                            } icon: {
+                                Image(systemName: "folder.fill")
+                                    .foregroundStyle(Theme.accent.opacity(0.7))
+                            }
                         }
                     }
+                } header: {
+                    HStack {
+                        Text("Documents")
+                        Spacer()
+                        if bundle.conceptCount > 0 {
+                            Text("\(bundle.conceptCount)")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
 
+                Section {
                     Button {
                         addConcept()
                     } label: {
-                        Label("New Concept", systemImage: "plus")
+                        actionRow("New Concept", systemImage: "plus")
+                    }
+                    .keyboardShortcut("n", modifiers: .command)
+
+                    Button {
+                        showPDFImporter = true
+                    } label: {
+                        actionRow("Import PDFs…", systemImage: "doc.badge.plus")
+                    }
+
+                    Button {
+                        showImporter = true
+                    } label: {
+                        actionRow("Import OKF Folder (Merge)…", systemImage: "folder.badge.plus")
+                    }
+
+                    Button {
+                        exportDocument = OKFBundleDocument(
+                            root: KnowledgeTransfer.exportWrapper(for: bundle)
+                        )
+                        showExporter = true
+                    } label: {
+                        actionRow("Export Bundle…", systemImage: "square.and.arrow.up")
                     }
                 }
             }
+            .formStyle(.grouped)
+            #if os(iOS)
+            .scrollDismissesKeyboard(.interactively)
+            #endif
             .navigationTitle(bundle.name)
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
@@ -75,20 +123,7 @@ struct KnowledgeBundleView: View {
                         try? context.save()
                         dismiss()
                     }
-                }
-                ToolbarItem(placement: .secondaryAction) {
-                    Menu {
-                        Button("Import Folder (Merge)…") { showImporter = true }
-                        Button("Import PDFs…") { showPDFImporter = true }
-                        Button("Export Bundle…") {
-                            exportDocument = OKFBundleDocument(
-                                root: KnowledgeTransfer.exportWrapper(for: bundle)
-                            )
-                            showExporter = true
-                        }
-                    } label: {
-                        Label("Import/Export", systemImage: "square.and.arrow.up.on.square")
-                    }
+                    .keyboardShortcut(.defaultAction)
                 }
             }
             .fileImporter(
@@ -147,17 +182,53 @@ struct KnowledgeBundleView: View {
     // MARK: - Rows
 
     private func conceptRow(_ name: String, concept: KnowledgeConcept) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             Image(systemName: icon(for: concept.kind))
-                .foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 1) {
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Theme.accent)
+                .frame(width: 26, height: 26)
+                .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 7))
+            VStack(alignment: .leading, spacing: 2) {
                 Text(concept.displayTitle)
-                if concept.kind == .concept {
-                    Text(concept.typeName)
-                        .font(.caption2).foregroundStyle(.secondary)
-                }
+                    .lineLimit(1)
+                Text(subtitle(for: concept))
+                    .font(.caption2).foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
+            .padding(.vertical, 1)
         }
+        .padding(.vertical, 2)
+    }
+
+    private func subtitle(for concept: KnowledgeConcept) -> String {
+        var parts: [String] = []
+        switch concept.kind {
+        case .concept: parts.append(concept.typeName)
+        case .index: parts.append("index")
+        case .log: parts.append("log")
+        }
+        if let summary = concept.summary, !summary.isEmpty {
+            parts.append(summary)
+        } else if !concept.tags.isEmpty {
+            parts.append(concept.tags.joined(separator: ", "))
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    /// Uniform accent-tinted row for the action buttons below the tree.
+    private func actionRow(_ title: String, systemImage: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: systemImage)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Theme.accent)
+                .frame(width: 26, height: 26)
+                .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 7))
+            Text(title)
+                .foregroundStyle(.primary)
+            Spacer(minLength: 0)
+        }
+        .contentShape(Rectangle())
+        .padding(.vertical, 2)
     }
 
     private func icon(for kind: KnowledgeDocKind) -> String {

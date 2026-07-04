@@ -46,6 +46,7 @@ struct ConceptEditorView: View {
         .navigationTitle(concept.displayTitle)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
+        .scrollDismissesKeyboard(.interactively)
         #endif
         .onAppear { pathDraft = concept.path }
         .onDisappear {

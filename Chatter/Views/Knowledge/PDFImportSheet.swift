@@ -44,10 +44,12 @@ struct PDFImportSheet: View {
                         default: onFinish(job.report)
                         }
                     }
+                    .keyboardShortcut(.cancelAction)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     if case .idle = job.phase {
                         Button("Start") { start() }
+                            .keyboardShortcut(.defaultAction)
                     }
                 }
             }
@@ -74,8 +76,32 @@ struct PDFImportSheet: View {
     private var optionsContent: some View {
         Group {
             Section {
-                Text("Import \(urls.count) PDF\(urls.count == 1 ? "" : "s") into “\(bundle.name)”")
+                HStack(spacing: 12) {
+                    Image(systemName: "doc.richtext")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(Theme.accent)
+                        .frame(width: 40, height: 40)
+                        .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(urls.count) PDF\(urls.count == 1 ? "" : "s") selected")
+                            .font(.headline)
+                        Text("Import into “\(bundle.name)”")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.vertical, 4)
+
+                if urls.count == 1 {
+                    fileRow(urls[0])
+                } else {
+                    DisclosureGroup("Files") {
+                        ForEach(urls, id: \.self) { url in
+                            fileRow(url)
+                        }
+                    }
+                }
             }
+
             Section {
                 if canConvert {
                     Picker("Model", selection: $selectedModel) {
@@ -89,30 +115,55 @@ struct PDFImportSheet: View {
                             Text(model.name).tag(model.name)
                         }
                     }
-                    Text("The extracted text is sent to the selected model, which cleans it up and splits it into concepts. PDFs without a text layer are skipped (no OCR yet).")
-                        .font(.caption).foregroundStyle(.secondary)
                 } else {
-                    Text("No API key or models available — PDFs will be imported as raw text without AI conversion.")
-                        .font(.caption).foregroundStyle(.secondary)
+                    Label {
+                        Text("No API key or models available — PDFs will be imported as raw text without AI conversion.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } icon: {
+                        Image(systemName: "exclamationmark.triangle")
+                            .foregroundStyle(.orange)
+                    }
                 }
             } header: {
                 Text("Conversion")
+            } footer: {
+                if canConvert {
+                    Text("The extracted text is sent to the selected model, which cleans it up and splits it into concepts. PDFs without a text layer are skipped (no OCR yet).")
+                }
             }
         }
     }
 
+    private func fileRow(_ url: URL) -> some View {
+        Label {
+            Text(url.deletingPathExtension().lastPathComponent)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        } icon: {
+            Image(systemName: "doc.fill")
+                .foregroundStyle(.secondary)
+        }
+        .font(.callout)
+    }
+
     private func runningContent(current: Int, total: Int, fileName: String) -> some View {
         Section {
-            VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 14) {
                 // Indeterminate: converting one PDF is the slow step, and a
                 // determinate bar over the file count would sit still for it.
-                ProgressView("Converting \(current) of \(total)")
-                Text(fileName)
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                Text("Imported so far: \(job.report.imported) concepts")
-                    .font(.caption2).foregroundStyle(.tertiary)
+                ProgressView()
+                    .controlSize(.regular)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Converting \(current) of \(total)")
+                        .font(.subheadline.weight(.medium))
+                    Text(fileName)
+                        .font(.caption).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle)
+                    Text("Imported so far: \(job.report.imported) concepts")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                }
             }
-            .padding(.vertical, 4)
+            .padding(.vertical, 6)
         }
     }
 
