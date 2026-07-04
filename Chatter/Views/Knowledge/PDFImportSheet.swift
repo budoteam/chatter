@@ -32,19 +32,13 @@ struct PDFImportSheet: View {
                 }
             }
             .formStyle(.grouped)
-            .navigationTitle("Import PDFs")
             #if os(iOS)
+            .navigationTitle("Import PDFs")
             .navigationBarTitleDisplayMode(.inline)
-            #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        switch job.phase {
-                        case .running: job.cancel()
-                        default: onFinish(job.report)
-                        }
-                    }
-                    .keyboardShortcut(.cancelAction)
+                    Button("Cancel") { cancel() }
+                        .keyboardShortcut(.cancelAction)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     if case .idle = job.phase {
@@ -53,7 +47,22 @@ struct PDFImportSheet: View {
                     }
                 }
             }
+            #endif
         }
+        #if os(macOS)
+        // No NavigationStack/toolbar chrome in macOS sheets — see SheetHeader.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            SheetHeader(title: "Import PDFs") {
+                Button("Cancel") { cancel() }
+                    .keyboardShortcut(.cancelAction)
+            } trailing: {
+                if case .idle = job.phase {
+                    Button("Start") { start() }
+                        .keyboardShortcut(.defaultAction)
+                }
+            }
+        }
+        #endif
         .interactiveDismissDisabled(isRunning)
         .onAppear(perform: seedModel)
         // Models may load after the sheet appears; re-seed while still unset.
@@ -174,6 +183,13 @@ struct PDFImportSheet: View {
         selectedModel = SessionFactory.defaultModel(
             agent: SessionFactory.defaultAgent(in: agents), models: env.models
         )
+    }
+
+    private func cancel() {
+        switch job.phase {
+        case .running: job.cancel()
+        default: onFinish(job.report)
+        }
     }
 
     private func start() {

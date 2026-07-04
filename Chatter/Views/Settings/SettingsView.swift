@@ -29,17 +29,23 @@ struct SettingsView: View {
         }
         .onAppear { apiKey = KeychainService.loadAPIKey() ?? "" }
         .sheet(item: $editingServer) { server in
-            NavigationStack { MCPServerEditorView(server: server) }
-                #if os(macOS)
-                .frame(minWidth: 480, minHeight: 520)
-                #endif
+            serverEditor(server)
         }
         .sheet(isPresented: $showingNewServer) {
-            NavigationStack { MCPServerEditorView(server: nil) }
-                #if os(macOS)
-                .frame(minWidth: 480, minHeight: 520)
-                #endif
+            serverEditor(nil)
         }
+    }
+
+    /// On macOS the editor renders its own SheetHeader — a NavigationStack
+    /// toolbar in a sheet shifts the main window's content down on dismiss.
+    @ViewBuilder
+    private func serverEditor(_ server: MCPServerConfig?) -> some View {
+        #if os(macOS)
+        MCPServerEditorView(server: server)
+            .frame(minWidth: 480, minHeight: 520)
+        #else
+        NavigationStack { MCPServerEditorView(server: server) }
+        #endif
     }
 
     // MARK: - API key

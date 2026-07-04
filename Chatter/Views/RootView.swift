@@ -7,31 +7,43 @@ struct RootView: View {
     @Query(sort: \Agent.createdAt) private var agents: [Agent]
 
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var preferredColumn: NavigationSplitViewColumn = .sidebar
     @State private var showSettings = false
 
     var body: some View {
         @Bindable var env = env
-        NavigationSplitView(columnVisibility: $columnVisibility) {
+        NavigationSplitView(columnVisibility: $columnVisibility, preferredCompactColumn: $preferredColumn) {
             SidebarView(showSettings: $showSettings)
                 .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 360)
         } detail: {
             Group {
-                if let session = env.selectedSession {
-                    ChatView(session: session)
-                        .id(session.id)
-                } else {
-                    WelcomeView(
-                        onNewChat: startNewSession,
-                        onSuggestion: { prompt in
-                            env.pendingPrompt = prompt
-                            startNewSession()
-                        }
-                    )
+                switch env.mainScreen {
+                case .agents:
+                    AgentsScreen()
+                case .knowledge:
+                    KnowledgeScreen()
+                case .chat:
+                    if let session = env.selectedSession {
+                        ChatView(session: session)
+                            .id(session.id)
+                    } else {
+                        WelcomeView(
+                            onNewChat: startNewSession,
+                            onSuggestion: { prompt in
+                                env.pendingPrompt = prompt
+                                startNewSession()
+                            }
+                        )
+                    }
                 }
             }
             .background(GeminiBackground())
         }
         .navigationSplitViewStyle(.balanced)
+        // On iPhone (compact), surface the detail column when the user picks a
+        // screen or opens a chat; on regular widths both columns stay visible.
+        .onChange(of: env.mainScreen) { preferredColumn = .detail }
+        .onChange(of: env.selectedSession?.id) { preferredColumn = .detail }
         #if os(macOS)
         .frame(minWidth: 860, minHeight: 560)
         #endif
@@ -51,7 +63,7 @@ struct RootView: View {
     private func startNewSession() {
         let agent = env.selectedSession?.agent ?? SessionFactory.defaultAgent(in: agents)
         let session = SessionFactory.create(in: context, agent: agent, models: env.models)
-        env.selectedSession = session
+        env.openChat(session)
     }
 
     private func seedDefaultAgentIfNeeded() {

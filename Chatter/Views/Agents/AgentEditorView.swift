@@ -100,6 +100,7 @@ struct AgentEditorView: View {
             }
         }
         .formStyle(.grouped)
+        #if os(iOS)
         .navigationTitle(agent == nil ? "New Agent" : "Edit Agent")
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
@@ -110,6 +111,19 @@ struct AgentEditorView: View {
                     .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
+        #else
+        // No NavigationStack/toolbar in macOS sheets — see SheetHeader.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            SheetHeader(title: agent == nil ? "New Agent" : "Edit Agent") {
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+            } trailing: {
+                Button("Save") { save() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        #endif
         .onAppear(perform: load)
     }
 

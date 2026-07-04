@@ -1,6 +1,14 @@
 import Foundation
 import SwiftUI
 
+/// Which screen the detail (main) column shows. `.chat` falls back to the
+/// welcome view when no session is selected.
+enum MainScreen {
+    case chat
+    case agents
+    case knowledge
+}
+
 /// Root observable object: owns the shared services and cross-view UI state
 /// (current selection, cached model list, API-key presence).
 @MainActor
@@ -12,6 +20,8 @@ final class AppEnvironment {
     let engine: ChatEngine
 
     var selectedSession: ChatSession?
+    /// Which screen the detail column shows (chat / agents / knowledge).
+    var mainScreen: MainScreen = .chat
     var models: [OllamaModel] = []
     var isLoadingModels = false
     var modelLoadError: String?
@@ -35,6 +45,13 @@ final class AppEnvironment {
     }
 
     func requestNewSession() { newSessionRequestID = UUID() }
+
+    /// Selects a session and switches the detail column back to the chat view
+    /// (used when starting/opening a chat from the Agents overview).
+    func openChat(_ session: ChatSession) {
+        selectedSession = session
+        mainScreen = .chat
+    }
 
     func refreshAPIKeyState() { hasAPIKey = KeychainService.hasAPIKey }
 

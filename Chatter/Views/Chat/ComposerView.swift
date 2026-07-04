@@ -26,8 +26,21 @@ struct ComposerView: View {
                 .textFieldStyle(.plain)
                 .lineLimit(1...8)
                 .focused($focused)
-                .onSubmit(onSend)
                 .padding(.horizontal, 4)
+                #if os(macOS)
+                // Return sends; Shift+Return inserts a newline. onKeyPress runs
+                // before the field's own Return handling: we swallow plain
+                // Return (send instead) and let Shift+Return fall through so the
+                // multiline field inserts a line break.
+                .onKeyPress(phases: .down) { press in
+                    guard press.key == .return else { return .ignored }
+                    if press.modifiers.contains(.shift) { return .ignored }
+                    onSend()
+                    return .handled
+                }
+                #else
+                .onSubmit(onSend)
+                #endif
 
             HStack(spacing: 8) {
                 photoButton

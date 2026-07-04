@@ -109,23 +109,21 @@ struct KnowledgeBundleView: View {
             #if os(iOS)
             .scrollDismissesKeyboard(.interactively)
             #endif
-            .navigationTitle(bundle.name)
             #if os(iOS)
+            .navigationTitle(bundle.name)
             .navigationBarTitleDisplayMode(.inline)
             #endif
             .navigationDestination(for: KnowledgeConcept.self) { concept in
                 ConceptEditorView(concept: concept)
             }
+            #if os(iOS)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") {
-                        bundle.updatedAt = .now
-                        try? context.save()
-                        dismiss()
-                    }
-                    .keyboardShortcut(.defaultAction)
+                    Button("Done") { finish() }
+                        .keyboardShortcut(.defaultAction)
                 }
             }
+            #endif
             .fileImporter(
                 isPresented: $showImporter,
                 allowedContentTypes: [.folder]
@@ -175,8 +173,25 @@ struct KnowledgeBundleView: View {
             }
         }
         #if os(macOS)
+        // No NavigationStack/toolbar chrome in macOS sheets — see SheetHeader.
+        // Attached outside the stack so Done stays visible while drilled into
+        // a concept.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            SheetHeader(title: bundle.name) {
+                EmptyView()
+            } trailing: {
+                Button("Done") { finish() }
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
         .frame(minWidth: 560, minHeight: 620)
         #endif
+    }
+
+    private func finish() {
+        bundle.updatedAt = .now
+        try? context.save()
+        dismiss()
     }
 
     // MARK: - Rows

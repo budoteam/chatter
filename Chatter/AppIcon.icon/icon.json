@@ -3,8 +3,8 @@
     {
       "value" : {
         "linear-gradient" : [
-          "extended-gray:0.50000,1.00000",
-          "extended-gray:0.25000,1.00000"
+          "extended-gray:0.25000,1.00000",
+          "extended-gray:0.00000,1.00000"
         ]
       }
     },
@@ -24,10 +24,19 @@
         {
           "fill-specializations" : [
             {
+              "value" : {
+                "solid" : "extended-gray:1.00000,1.00000"
+              }
+            },
+            {
               "appearance" : "dark",
               "value" : {
-                "solid" : "extended-gray:0.50000,1.00000"
+                "solid" : "extended-gray:1.00000,1.00000"
               }
+            },
+            {
+              "appearance" : "tinted",
+              "value" : "automatic"
             }
           ],
           "image-name" : "chatter.png",

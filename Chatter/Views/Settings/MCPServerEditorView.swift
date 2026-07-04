@@ -84,6 +84,7 @@ struct MCPServerEditorView: View {
             }
         }
         .formStyle(.grouped)
+        #if os(iOS)
         .navigationTitle(server == nil ? "New Server" : "Edit Server")
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
@@ -93,6 +94,19 @@ struct MCPServerEditorView: View {
                 Button("Save") { save() }.disabled(!isValid)
             }
         }
+        #else
+        // No NavigationStack/toolbar in macOS sheets — see SheetHeader.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            SheetHeader(title: server == nil ? "New Server" : "Edit Server") {
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+            } trailing: {
+                Button("Save") { save() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!isValid)
+            }
+        }
+        #endif
         .onAppear(perform: load)
         .confirmationDialog(
             "Delete this MCP server?",

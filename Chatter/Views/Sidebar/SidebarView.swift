@@ -7,24 +7,26 @@ struct SidebarView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.modelContext) private var context
     @Query(sort: \Agent.createdAt) private var agents: [Agent]
-    @Query(sort: \KnowledgeBundle.name) private var knowledgeBundles: [KnowledgeBundle]
     @Query(sort: \ChatSession.updatedAt, order: .reverse) private var sessions: [ChatSession]
-
-    @State private var editingAgent: Agent?
-    @State private var showingNewAgent = false
-    @State private var openBundle: KnowledgeBundle?
-    @State private var showingKnowledgeImporter = false
-    @State private var knowledgeImportReport: String?
 
     var body: some View {
         List(selection: selectionBinding) {
-            agentsSection
-            knowledgeSection
-            sessionsSection
+            if sessions.isEmpty {
+                emptyState
+            } else {
+                sessionsSection
+            }
         }
         .listStyle(.sidebar)
-        .environment(\.defaultMinListRowHeight, 36)
+        .environment(\.defaultMinListRowHeight, 34)
+        #if os(iOS)
+        // The default grouped sidebar background looks heavy on iOS; use the
+        // app canvas instead so the sidebar matches the detail column.
+        .scrollContentBackground(.hidden)
+        .background(Theme.canvas)
+        #endif
         .safeAreaInset(edge: .top, spacing: 0) { newChatButton }
+        .safeAreaInset(edge: .bottom, spacing: 0) { navButtons }
         .navigationTitle("Chatter")
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -36,38 +38,6 @@ struct SidebarView: View {
             }
         }
         #endif
-        .sheet(item: $editingAgent) { agent in
-            NavigationStack { AgentEditorView(agent: agent) }
-                #if os(macOS)
-                .frame(minWidth: 500, minHeight: 620)
-                #endif
-        }
-        .sheet(isPresented: $showingNewAgent) {
-            NavigationStack { AgentEditorView(agent: nil) }
-                #if os(macOS)
-                .frame(minWidth: 500, minHeight: 620)
-                #endif
-        }
-        .sheet(item: $openBundle) { bundle in
-            KnowledgeBundleView(bundle: bundle)
-        }
-        .fileImporter(
-            isPresented: $showingKnowledgeImporter,
-            allowedContentTypes: [.folder]
-        ) { result in
-            handleKnowledgeImport(result)
-        }
-        .alert(
-            "Knowledge Import",
-            isPresented: Binding(
-                get: { knowledgeImportReport != nil },
-                set: { if !$0 { knowledgeImportReport = nil } }
-            )
-        ) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(knowledgeImportReport ?? "")
-        }
     }
 
     // MARK: - New Chat
@@ -85,112 +55,52 @@ struct SidebarView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 11)
             .background(Theme.brandGradient, in: Capsule())
+            .shadow(color: Theme.accent.opacity(0.28), radius: 8, y: 3)
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)  // ⌘N comes from the app-level command
         .padding(.horizontal, 14)
-        .padding(.top, 10)
-        .padding(.bottom, 4)
+        .padding(.top, 12)
+        .padding(.bottom, 18)
     }
 
-    // MARK: - Agents
+    // MARK: - Bottom navigation (Agents / Knowledge)
 
-    private var agentsSection: some View {
-        Section {
-            ForEach(agents) { agent in
-                Button { startNewSession(agent: agent) } label: {
-                    HStack(spacing: 10) {
-                        AgentBadge(symbol: agent.iconSymbol, color: agent.color, size: 26)
-                        Text(agent.name)
-                            .font(.subheadline.weight(.medium))
-                            .lineLimit(1)
-                        Spacer(minLength: 0)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .contextMenu {
-                    Button("New Chat") { startNewSession(agent: agent) }
-                    Button("Edit…") { editingAgent = agent }
-                    if agents.count > 1 {
-                        Divider()
-                        Button("Delete", role: .destructive) { delete(agent) }
-                    }
-                }
+    private var navButtons: some View {
+        VStack(spacing: 0) {
+            Rectangle()
+                .fill(Theme.separator)
+                .frame(height: 1)
+            HStack(spacing: 8) {
+                navButton(title: "Agents", systemImage: "person.2.fill", screen: .agents)
+                navButton(title: "Knowledge", systemImage: "books.vertical.fill", screen: .knowledge)
             }
-
-            Button { showingNewAgent = true } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(Theme.accent)
-                        .frame(width: 26, height: 26)
-                        .background(Theme.accent.opacity(0.12), in: Circle())
-                    Text("New Agent")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    Spacer(minLength: 0)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-        } header: {
-            sectionHeader("Agents")
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
         }
+        .background(.bar)
     }
 
-    // MARK: - Knowledge
-
-    private var knowledgeSection: some View {
-        Section {
-            ForEach(knowledgeBundles) { bundle in
-                Button { openBundle = bundle } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: "books.vertical.fill")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(Theme.accent)
-                            .frame(width: 26, height: 26)
-                            .background(Theme.accent.opacity(0.12), in: Circle())
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(bundle.name)
-                                .font(.subheadline.weight(.medium))
-                                .lineLimit(1)
-                            Text("\(bundle.conceptCount) concepts")
-                                .font(.caption2).foregroundStyle(.secondary)
-                        }
-                        Spacer(minLength: 0)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .contextMenu {
-                    Button("Open") { openBundle = bundle }
-                    Divider()
-                    Button("Delete", role: .destructive) { delete(bundle) }
-                }
+    private func navButton(title: String, systemImage: String, screen: MainScreen) -> some View {
+        let isActive = env.mainScreen == screen
+        return Button { env.mainScreen = screen } label: {
+            VStack(spacing: 4) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 15, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
+                Text(title)
+                    .font(.caption2.weight(.semibold))
             }
-
-            Menu {
-                Button("New Bundle") { createBundle() }
-                Button("Import OKF Folder…") { showingKnowledgeImporter = true }
-            } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(Theme.accent)
-                        .frame(width: 26, height: 26)
-                        .background(Theme.accent.opacity(0.12), in: Circle())
-                    Text("Add Knowledge")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    Spacer(minLength: 0)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-        } header: {
-            sectionHeader("Knowledge")
+            .foregroundStyle(isActive ? Theme.accent : Color.secondary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+            .background(
+                isActive ? AnyShapeStyle(Theme.accent.opacity(0.12)) : AnyShapeStyle(.clear),
+                in: RoundedRectangle(cornerRadius: Theme.Radius.sm, style: .continuous)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.sm, style: .continuous))
         }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Sessions
@@ -199,9 +109,7 @@ struct SidebarView: View {
         ForEach(SessionGroup.grouped(sessions), id: \.title) { group in
             Section {
                 ForEach(group.sessions) { session in
-                    Text(session.title.isEmpty ? "New Chat" : session.title)
-                        .font(.subheadline)
-                        .lineLimit(1)
+                    sessionRow(session)
                         .tag(session)
                         .contextMenu {
                             Button("Delete", role: .destructive) { delete(session) }
@@ -218,17 +126,59 @@ struct SidebarView: View {
         }
     }
 
+    private func sessionRow(_ session: ChatSession) -> some View {
+        HStack(spacing: 9) {
+            // Tiny agent-colored bubble so chats are attributable at a glance.
+            Image(systemName: "bubble.left.fill")
+                .font(.system(size: 10))
+                .foregroundStyle(
+                    (session.agent?.color ?? Theme.accent).opacity(0.75)
+                )
+            Text(session.title.isEmpty ? "New Chat" : session.title)
+                .font(.subheadline)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 2)
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 6) {
+            Image(systemName: "bubble.left.and.bubble.right")
+                .font(.system(size: 22, weight: .medium))
+                .foregroundStyle(.tertiary)
+            Text("No chats yet")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+            Text("Start a conversation with New Chat.")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, Theme.Spacing.xl)
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+    }
+
     private func sectionHeader(_ title: String) -> some View {
         Text(title)
             .font(.caption2.weight(.semibold))
             .foregroundStyle(.tertiary)
             .textCase(.uppercase)
+            .padding(.top, 4)
+            .padding(.bottom, 2)
     }
 
     // MARK: - Selection
 
+    /// The list highlights a session only while the chat screen is active; when
+    /// the Agents/Knowledge overview is showing, nothing is selected. Selecting
+    /// a row switches back to the chat screen.
     private var selectionBinding: Binding<ChatSession?> {
-        Binding(get: { env.selectedSession }, set: { env.selectedSession = $0 })
+        Binding(
+            get: { env.mainScreen == .chat ? env.selectedSession : nil },
+            set: { if let session = $0 { env.openChat(session) } else { env.selectedSession = nil } }
+        )
     }
 
     private var defaultAgent: Agent? {
@@ -239,51 +189,13 @@ struct SidebarView: View {
 
     private func startNewSession(agent: Agent?) {
         let session = SessionFactory.create(in: context, agent: agent, models: env.models)
-        env.selectedSession = session
+        env.openChat(session)
     }
 
     private func delete(_ session: ChatSession) {
         if env.selectedSession == session { env.selectedSession = nil }
         context.delete(session)
         try? context.save()
-    }
-
-    private func delete(_ agent: Agent) {
-        context.delete(agent)
-        try? context.save()
-    }
-
-    private func createBundle() {
-        let bundle = KnowledgeBundle(name: "New Bundle")
-        context.insert(bundle)
-        try? context.save()
-        openBundle = bundle
-    }
-
-    private func delete(_ bundle: KnowledgeBundle) {
-        if openBundle == bundle { openBundle = nil }
-        // Scrub the soft references so agents don't keep dangling bundle IDs
-        // (they'd silently lose their knowledge tools with no UI trace).
-        let allAgents = (try? context.fetch(FetchDescriptor<Agent>())) ?? []
-        for agent in allAgents where agent.knowledgeBundleIDs.contains(bundle.id) {
-            agent.knowledgeBundleIDs.removeAll { $0 == bundle.id }
-        }
-        context.delete(bundle)
-        try? context.save()
-    }
-
-    private func handleKnowledgeImport(_ result: Result<URL, Error>) {
-        switch result {
-        case .success(let url):
-            do {
-                let report = try KnowledgeTransfer.importBundle(from: url, into: context)
-                knowledgeImportReport = report.alertText
-            } catch {
-                knowledgeImportReport = "Import failed: \(error.localizedDescription)"
-            }
-        case .failure(let error):
-            knowledgeImportReport = "Import failed: \(error.localizedDescription)"
-        }
     }
 }
 
