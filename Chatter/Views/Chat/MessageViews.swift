@@ -3,23 +3,35 @@ import SwiftUI
 // MARK: - User
 
 struct UserBubble: View {
-    let text: String
+    let message: Message
+
+    private var attachments: [ImageAttachment] { message.imageAttachments }
+    private var hasText: Bool { !message.content.isEmpty }
 
     var body: some View {
         HStack {
             Spacer(minLength: 56)
-            Text(text)
-                .textSelection(.enabled)
-                .padding(.horizontal, 15)
-                .padding(.vertical, 10)
-                .background(
-                    Theme.userBubble,
-                    in: UnevenRoundedRectangle(
-                        topLeadingRadius: 20, bottomLeadingRadius: 20,
-                        bottomTrailingRadius: 6, topTrailingRadius: 20,
-                        style: .continuous
-                    )
-                )
+            VStack(alignment: .trailing, spacing: 6) {
+                if !attachments.isEmpty {
+                    ForEach(attachments) { attachment in
+                        AttachmentThumbnail(base64: attachment.base64, size: 160)
+                    }
+                }
+                if hasText {
+                    Text(message.content)
+                        .textSelection(.enabled)
+                        .padding(.horizontal, 15)
+                        .padding(.vertical, 10)
+                        .background(
+                            Theme.userBubble,
+                            in: UnevenRoundedRectangle(
+                                topLeadingRadius: 20, bottomLeadingRadius: 20,
+                                bottomTrailingRadius: 6, topTrailingRadius: 20,
+                                style: .continuous
+                            )
+                        )
+                }
+            }
         }
     }
 }

@@ -61,6 +61,18 @@ struct OllamaService: OllamaServiceProtocol {
         }
     }
 
+    func modelCapabilities(model: String) async throws -> [String] {
+        var request = try makeRequest(path: "/api/show", method: "POST")
+        request.httpBody = try JSONEncoder().encode(OllamaShowRequest(model: model))
+        let (data, response) = try await session.data(for: request)
+        try Self.validate(response, data: data)
+        do {
+            return try JSONDecoder().decode(OllamaShowResponse.self, from: data).capabilities ?? []
+        } catch {
+            throw ServiceError.decoding(error.localizedDescription)
+        }
+    }
+
     // MARK: - Chat streaming
 
     func streamChat(

@@ -7,24 +7,29 @@ import SwiftUI
 @Observable
 final class ChatViewModel {
     var inputText = ""
+    var pendingImages: [ImageAttachment] = []
     var isSending = false
     var errorMessage: String?
 
     private var task: Task<Void, Never>?
 
     var canSend: Bool {
-        !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isSending
+        guard !isSending else { return false }
+        let hasText = !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return hasText || !pendingImages.isEmpty
     }
 
     func send(env: AppEnvironment, session: ChatSession, agent: Agent?, context: ModelContext) {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !isSending else { return }
+        let images = pendingImages
+        guard (!text.isEmpty || !images.isEmpty), !isSending else { return }
         inputText = ""
+        pendingImages = []
         isSending = true
 
         task = Task {
             do {
-                try await env.engine.send(text: text, session: session, agent: agent, context: context)
+                try await env.engine.send(text: text, images: images, session: session, agent: agent, context: context)
             } catch is CancellationError {
                 // User stopped — nothing to surface.
             } catch {

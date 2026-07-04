@@ -35,21 +35,41 @@ struct OllamaTagsResponse: Codable {
 struct OllamaChatMessage: Codable {
     var role: String
     var content: String
+    /// Base64-encoded images (raw, no `data:` prefix) for vision-capable models.
+    var images: [String]?
     var toolCalls: [OllamaToolCall]?
     var toolName: String?
 
     enum CodingKeys: String, CodingKey {
-        case role, content
+        case role, content, images
         case toolCalls = "tool_calls"
         case toolName = "tool_name"
     }
 
-    init(role: String, content: String, toolCalls: [OllamaToolCall]? = nil, toolName: String? = nil) {
+    init(
+        role: String,
+        content: String,
+        images: [String]? = nil,
+        toolCalls: [OllamaToolCall]? = nil,
+        toolName: String? = nil
+    ) {
         self.role = role
         self.content = content
+        self.images = images
         self.toolCalls = toolCalls
         self.toolName = toolName
     }
+}
+
+// MARK: - Model capabilities (/api/show)
+
+struct OllamaShowRequest: Codable {
+    var model: String
+}
+
+struct OllamaShowResponse: Codable {
+    /// e.g. ["completion", "tools", "vision"].
+    var capabilities: [String]?
 }
 
 /// A tool definition sent to the model.

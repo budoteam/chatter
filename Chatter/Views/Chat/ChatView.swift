@@ -140,7 +140,7 @@ struct ChatView: View {
     private func transcriptItemView(_ item: TranscriptItem) -> some View {
         switch item {
         case .user(let message):
-            UserBubble(text: message.content)
+            UserBubble(message: message)
         case .activity(let steps, let live):
             ActivityGroupView(steps: steps, live: live)
         case .answer(let message):

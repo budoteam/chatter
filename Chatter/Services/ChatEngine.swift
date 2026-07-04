@@ -29,12 +29,19 @@ final class ChatEngine {
     }
 
     /// Appends the user's message, then runs the assistant turn(s).
-    func send(text: String, session: ChatSession, agent: Agent?, context: ModelContext) async throws {
+    func send(
+        text: String,
+        images: [ImageAttachment] = [],
+        session: ChatSession,
+        agent: Agent?,
+        context: ModelContext
+    ) async throws {
         let model = resolveModel(agent: agent, session: session)
         guard !model.isEmpty else { throw EngineError.noModel }
         session.modelId = model
 
         let userMsg = Message(role: .user, content: text, orderIndex: session.nextOrderIndex)
+        userMsg.imageAttachments = images
         userMsg.session = session
         context.insert(userMsg)
         session.updatedAt = .now
@@ -241,7 +248,11 @@ final class ChatEngine {
         case .system:
             return OllamaChatMessage(role: "system", content: m.content)
         case .user:
-            return OllamaChatMessage(role: "user", content: m.content)
+            let images = m.imageAttachments.map(\.base64)
+            return OllamaChatMessage(
+                role: "user", content: m.content,
+                images: images.isEmpty ? nil : images
+            )
         }
     }
 }

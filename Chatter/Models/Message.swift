@@ -20,6 +20,8 @@ final class Message {
 
     /// For assistant turns that requested tools: JSON-encoded `[ToolCall]`.
     var toolCallsJSON: String?
+    /// For user turns with image attachments: JSON-encoded `[ImageAttachment]`.
+    var attachmentsJSON: String?
     /// For `tool` role messages: which tool produced this result.
     var toolName: String?
     /// Reasoning trace from thinking models (shown collapsed in the UI).
@@ -65,6 +67,29 @@ final class Message {
             toolCallsJSON = json
         }
     }
+
+    var imageAttachments: [ImageAttachment] {
+        get {
+            guard let json = attachmentsJSON, let data = json.data(using: .utf8) else { return [] }
+            return (try? JSONDecoder().decode([ImageAttachment].self, from: data)) ?? []
+        }
+        set {
+            guard !newValue.isEmpty,
+                  let data = try? JSONEncoder().encode(newValue),
+                  let json = String(data: data, encoding: .utf8) else {
+                attachmentsJSON = nil
+                return
+            }
+            attachmentsJSON = json
+        }
+    }
+}
+
+/// An image attached to a user message, stored as downscaled Base64 JPEG.
+struct ImageAttachment: Codable, Identifiable, Hashable {
+    var id: UUID = UUID()
+    /// Raw Base64 JPEG (no `data:` prefix), ready for Ollama's `images` array.
+    var base64: String
 }
 
 /// A tool invocation requested by the model.

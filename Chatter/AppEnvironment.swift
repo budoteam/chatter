@@ -16,6 +16,8 @@ final class AppEnvironment {
     var isLoadingModels = false
     var modelLoadError: String?
     var hasAPIKey: Bool = KeychainService.hasAPIKey
+    /// Cached `/api/show` capabilities per model name (lowercased set).
+    var modelCapabilities: [String: Set<String>] = [:]
     /// Text to pre-fill the composer of the next opened chat (welcome chips).
     var pendingPrompt: String?
 
@@ -51,6 +53,23 @@ final class AppEnvironment {
         } catch {
             modelLoadError = error.localizedDescription
             AppLogger.api.error("listModels failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// Whether `model` supports image input. Best-effort and cached: on any
+    /// failure (or missing `/api/show`) it returns false so the image button
+    /// stays disabled rather than sending images a model would ignore.
+    func supportsVision(_ model: String) async -> Bool {
+        guard !model.isEmpty else { return false }
+        if let cached = modelCapabilities[model] { return cached.contains("vision") }
+        guard hasAPIKey else { return false }
+        do {
+            let caps = Set(try await ollama.modelCapabilities(model: model).map { $0.lowercased() })
+            modelCapabilities[model] = caps
+            return caps.contains("vision")
+        } catch {
+            AppLogger.api.error("modelCapabilities failed for \(model, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            return false
         }
     }
 }

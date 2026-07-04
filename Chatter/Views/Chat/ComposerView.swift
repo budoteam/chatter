@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import PhotosUI
 
 /// Bottom input card: multiline text on top, agent selector + send button in a
 /// control row inside the same rounded surface (Gemini-style). The model is
@@ -12,9 +13,15 @@ struct ComposerView: View {
     @Environment(AppEnvironment.self) private var env
     @Query(sort: \Agent.createdAt) private var agents: [Agent]
     @FocusState private var focused: Bool
+    @State private var photoItems: [PhotosPickerItem] = []
+    @State private var supportsVision = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            if !viewModel.pendingImages.isEmpty {
+                thumbnailStrip
+            }
+
             TextField(placeholder, text: $viewModel.inputText, axis: .vertical)
                 .textFieldStyle(.plain)
                 .lineLimit(1...8)
@@ -23,10 +30,18 @@ struct ComposerView: View {
                 .padding(.horizontal, 4)
 
             HStack(spacing: 8) {
+                photoButton
                 agentMenu
                 Spacer(minLength: 8)
                 sendButton
             }
+        }
+        .task(id: currentModel) {
+            supportsVision = await env.supportsVision(currentModel)
+        }
+        .onChange(of: photoItems) { _, items in
+            guard !items.isEmpty else { return }
+            Task { await loadPickedImages(items) }
         }
         .padding(.horizontal, 14)
         .padding(.top, 14)
@@ -49,6 +64,58 @@ struct ComposerView: View {
     private var placeholder: String {
         if let name = session.agent?.name, !name.isEmpty { return "Message \(name)…" }
         return "Message Chatter…"
+    }
+
+    /// The model that will actually run this turn (agent's model, else session).
+    private var currentModel: String {
+        if let m = session.agent?.modelId, !m.isEmpty { return m }
+        return session.modelId
+    }
+
+    // MARK: - Image attachments
+
+    private var thumbnailStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(viewModel.pendingImages) { attachment in
+                    AttachmentThumbnail(base64: attachment.base64) {
+                        viewModel.pendingImages.removeAll { $0.id == attachment.id }
+                    }
+                }
+            }
+            .padding(.horizontal, 4)
+            .padding(.top, 2)
+        }
+    }
+
+    private var photoButton: some View {
+        PhotosPicker(
+            selection: $photoItems,
+            maxSelectionCount: 4,
+            matching: .images,
+            photoLibrary: .shared()
+        ) {
+            Image(systemName: "photo.on.rectangle")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(supportsVision ? Color.secondary : Color.secondary.opacity(0.35))
+                .frame(width: 30, height: 30)
+                .background(Theme.surfaceRaised, in: Circle())
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!supportsVision)
+        .help(supportsVision
+            ? "Attach images"
+            : "This model doesn’t support images")
+    }
+
+    private func loadPickedImages(_ items: [PhotosPickerItem]) async {
+        for item in items {
+            guard let data = try? await item.loadTransferable(type: Data.self),
+                  let base64 = ImageAttachmentProcessor.makeBase64JPEG(from: data) else { continue }
+            viewModel.pendingImages.append(ImageAttachment(base64: base64))
+        }
+        photoItems = []
     }
 
     // MARK: - Agent selector (the agent defines the model)

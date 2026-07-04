@@ -6,6 +6,10 @@ protocol OllamaServiceProtocol {
     /// Available models from `/api/tags`.
     func listModels() async throws -> [OllamaModel]
 
+    /// Capabilities for a model from `/api/show`, e.g. ["completion", "tools",
+    /// "vision"]. Used to gate features like image attachments.
+    func modelCapabilities(model: String) async throws -> [String]
+
     /// Streams a chat completion from `/api/chat`. Emits incremental content
     /// deltas and a final chunk carrying any tool calls + `done`.
     func streamChat(
@@ -17,6 +21,10 @@ protocol OllamaServiceProtocol {
 }
 
 extension OllamaServiceProtocol {
+    /// Default: no capability info (mocks/tests). The real service overrides
+    /// this with a `/api/show` call.
+    func modelCapabilities(model: String) async throws -> [String] { [] }
+
     /// One-shot completion: runs a tool-less chat and returns the full
     /// assistant text, dropping `.thinking`/`.toolCalls` chunks. Bound to
     /// every conformer (real service and mocks) so features that don't need
