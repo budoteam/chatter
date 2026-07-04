@@ -17,6 +17,7 @@ struct MCPServerEditorView: View {
     @State private var command = ""
     @State private var argsText = ""
     @State private var enabled = true
+    @State private var showingDeleteConfirmation = false
 
     /// Transports offered on this platform (stdio is macOS only).
     private var availableTransports: [MCPTransportKind] {
@@ -70,6 +71,17 @@ struct MCPServerEditorView: View {
                     Text("Launched as a local subprocess. The app must be able to spawn processes (macOS, sandbox off).")
                 }
             }
+
+            if server != nil {
+                Section {
+                    Button(role: .destructive) {
+                        showingDeleteConfirmation = true
+                    } label: {
+                        Label("Delete Server", systemImage: "trash")
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+            }
         }
         .formStyle(.grouped)
         .navigationTitle(server == nil ? "New Server" : "Edit Server")
@@ -82,6 +94,16 @@ struct MCPServerEditorView: View {
             }
         }
         .onAppear(perform: load)
+        .confirmationDialog(
+            "Delete this MCP server?",
+            isPresented: $showingDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) { delete() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes the server configuration. This can't be undone.")
+        }
     }
 
     private var isValid: Bool {
@@ -122,6 +144,15 @@ struct MCPServerEditorView: View {
             await env.mcp.disconnect(serverID: id)
             if target.enabled { await env.mcp.connect(target) }
         }
+        dismiss()
+    }
+
+    private func delete() {
+        guard let server else { return }
+        let id = server.id
+        Task { await env.mcp.disconnect(serverID: id) }
+        context.delete(server)
+        try? context.save()
         dismiss()
     }
 }

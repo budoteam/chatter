@@ -98,6 +98,13 @@ struct SettingsView: View {
                     }
                 }
                 .buttonStyle(.plain)
+                .contextMenu {
+                    Button(role: .destructive) {
+                        deleteServer(server)
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                }
             }
             .onDelete(perform: deleteServers)
 
@@ -167,11 +174,12 @@ struct SettingsView: View {
     }
 
     private func deleteServers(_ offsets: IndexSet) {
-        for index in offsets {
-            let server = servers[index]
-            Task { await env.mcp.disconnect(serverID: server.id) }
-            context.delete(server)
-        }
+        offsets.map { servers[$0] }.forEach(deleteServer)
+    }
+
+    private func deleteServer(_ server: MCPServerConfig) {
+        Task { await env.mcp.disconnect(serverID: server.id) }
+        context.delete(server)
         try? context.save()
     }
 }
