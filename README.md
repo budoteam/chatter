@@ -17,6 +17,11 @@ Multiplatform (iOS / iPadOS / macOS) LLM chat app powered by **Ollama Cloud**, w
   can browse/read concepts via built-in `knowledge__list` / `knowledge__read` tools. Import and
   export whole OKF bundles as folders; unknown frontmatter keys are preserved verbatim, so foreign
   bundles round-trip losslessly (known keys are re-emitted in canonical order).
+- **PDF → OKF import**: drop PDFs into a knowledge bundle — PDFKit extracts the text and the
+  selected Ollama model converts it into clean OKF concepts (markdown, title, description, tags,
+  thematic splitting per PDF folder). Without an API key (or if the model output is unusable) the
+  raw text is imported as a single concept instead. Scanned PDFs without a text layer are skipped
+  (no OCR yet).
 - Gemini-style design: airy canvas, brand gradient, rounded surfaces, streaming typing indicator.
 
 ## Requirements
@@ -79,7 +84,8 @@ Chatter/
   Models/        Agent, ChatSession, Message, MCPServerConfig,
                  KnowledgeBundle, KnowledgeConcept  (SwiftData, CloudKit-safe)
   Services/      OllamaService, MCPConnectionManager, ChatEngine, KeychainService, JSONValue
-    Knowledge/   OKFCodec, KnowledgeTransfer, KnowledgeToolProvider
+    Knowledge/   OKFCodec, KnowledgeTransfer, KnowledgeToolProvider,
+                 PDFKnowledgeImporter, PDFImportJob
   ViewModels/    ChatViewModel
   Views/         RootView, Sidebar/, Chat/, Agents/, Knowledge/, Settings/, Components/
   DesignSystem/  Theme

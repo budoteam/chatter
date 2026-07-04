@@ -15,6 +15,8 @@ struct KnowledgeBundleView: View {
     @State private var showExporter = false
     @State private var exportDocument: OKFBundleDocument?
     @State private var importReport: String?
+    @State private var showPDFImporter = false
+    @State private var pdfImportURLs: [URL]?
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -68,6 +70,7 @@ struct KnowledgeBundleView: View {
                 ToolbarItem(placement: .secondaryAction) {
                     Menu {
                         Button("Import Folder (Merge)…") { showImporter = true }
+                        Button("Import PDFs…") { showPDFImporter = true }
                         Button("Export Bundle…") {
                             exportDocument = OKFBundleDocument(
                                 root: KnowledgeTransfer.exportWrapper(for: bundle)
@@ -105,6 +108,31 @@ struct KnowledgeBundleView: View {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text(importReport ?? "")
+            }
+        }
+        // Attached to the NavigationStack, NOT the List: a second fileImporter
+        // on the same node as the folder importer can silently break on iOS.
+        .fileImporter(
+            isPresented: $showPDFImporter,
+            allowedContentTypes: [.pdf],
+            allowsMultipleSelection: true
+        ) { result in
+            switch result {
+            case .success(let urls):
+                pdfImportURLs = urls
+            case .failure(let error):
+                importReport = "Import failed: \(error.localizedDescription)"
+            }
+        }
+        .sheet(isPresented: Binding(
+            get: { pdfImportURLs != nil },
+            set: { if !$0 { pdfImportURLs = nil } }
+        )) {
+            PDFImportSheet(urls: pdfImportURLs ?? [], bundle: bundle) { report in
+                pdfImportURLs = nil
+                if report.imported > 0 || report.skipped > 0 || !report.warnings.isEmpty {
+                    importReport = report.alertText
+                }
             }
         }
         #if os(macOS)
