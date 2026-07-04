@@ -11,12 +11,14 @@ final class ChatEngine {
     private let ollama: OllamaServiceProtocol
     private let mcp: MCPConnectionManager
     private let knowledge: KnowledgeToolProvider
+    private let web: WebToolProvider
     private let maxToolIterations = 42
 
     init(ollama: OllamaServiceProtocol, mcp: MCPConnectionManager, knowledge: KnowledgeToolProvider) {
         self.ollama = ollama
         self.mcp = mcp
         self.knowledge = knowledge
+        self.web = WebToolProvider(ollama: ollama)
     }
 
     enum EngineError: LocalizedError {
@@ -64,6 +66,13 @@ final class ChatEngine {
         let knowledgeTools = knowledge.tools(bundleIDs: knowledgeBundleIDs, context: context)
         let knowledgeToolNames = Set(knowledgeTools.map(\.function.name))
         tools += knowledgeTools
+
+        // Built-in web research tools (ollama.com web search API), offered
+        // when the agent allows web access and an API key is present.
+        let webTools = (agent?.webAccessEnabled ?? true) && KeychainService.hasAPIKey
+            ? web.tools() : []
+        let webToolNames = Set(webTools.map(\.function.name))
+        tools += webTools
 
         // The knowledge overview is stable within one send; compute it once
         // instead of per tool-loop iteration (it fetches and walks bundles).
@@ -181,6 +190,8 @@ final class ChatEngine {
                             namespacedName: name, argumentsJSON: argsJSON,
                             bundleIDs: knowledgeBundleIDs, context: context
                         )
+                    } else if webToolNames.contains(name) {
+                        result = try await web.call(name: name, argumentsJSON: argsJSON)
                     } else {
                         result = try await mcp.callTool(namespacedName: name, argumentsJSON: argsJSON)
                     }

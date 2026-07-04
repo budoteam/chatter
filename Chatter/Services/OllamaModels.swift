@@ -61,6 +61,37 @@ struct OllamaChatMessage: Codable {
     }
 }
 
+// MARK: - Web research (/api/web_search, /api/web_fetch)
+
+struct OllamaWebSearchRequest: Codable {
+    var query: String
+    var maxResults: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case query
+        case maxResults = "max_results"
+    }
+}
+
+struct OllamaWebSearchResponse: Codable {
+    struct Result: Codable {
+        var title: String?
+        var url: String?
+        var content: String?
+    }
+    var results: [Result]?
+}
+
+struct OllamaWebFetchRequest: Codable {
+    var url: String
+}
+
+struct OllamaWebFetchResponse: Codable {
+    var title: String?
+    var content: String?
+    var links: [String]?
+}
+
 // MARK: - Model capabilities (/api/show)
 
 struct OllamaShowRequest: Codable {

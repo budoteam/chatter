@@ -21,6 +21,7 @@ struct AgentEditorView: View {
     @State private var colorHex = "6C5CE7"
     @State private var selectedServerIDs: Set<UUID> = []
     @State private var selectedBundleIDs: Set<UUID> = []
+    @State private var webAccess = true
 
     private let icons = ["sparkles", "brain", "bolt.fill", "wand.and.stars", "cpu",
                          "message.fill", "book.fill", "chevron.left.forwardslash.chevron.right",
@@ -65,6 +66,14 @@ struct AgentEditorView: View {
             Section("System Prompt") {
                 TextField("Instructions for this agent…", text: $systemPrompt, axis: .vertical)
                     .lineLimit(4...12)
+            }
+
+            Section {
+                Toggle("Web search & page fetch", isOn: $webAccess)
+            } header: {
+                Text("Web Research")
+            } footer: {
+                Text("Lets the agent search the web and read pages via Ollama's web search API (uses your API key).")
             }
 
             Section("MCP Servers") {
@@ -187,6 +196,7 @@ struct AgentEditorView: View {
         colorHex = agent.colorHex
         selectedServerIDs = Set(agent.mcpServerIDs)
         selectedBundleIDs = Set(agent.knowledgeBundleIDs)
+        webAccess = agent.webAccessEnabled
     }
 
     private func save() {
@@ -199,6 +209,7 @@ struct AgentEditorView: View {
         target.colorHex = colorHex
         target.mcpServerIDs = Array(selectedServerIDs)
         target.knowledgeBundleIDs = Array(selectedBundleIDs)
+        target.webAccessEnabled = webAccess
         if agent == nil {
             context.insert(target)
         }

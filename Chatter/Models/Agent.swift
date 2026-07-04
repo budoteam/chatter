@@ -18,6 +18,8 @@ final class Agent {
     var mcpServerIDs: [UUID] = []
     /// IDs of the `KnowledgeBundle`s this agent can consult.
     var knowledgeBundleIDs: [UUID] = []
+    /// Whether the built-in web research tools (search & fetch) are offered.
+    var webAccessEnabled: Bool = true
     var createdAt: Date = Date()
     var isDefault: Bool = false
 
@@ -33,6 +35,7 @@ final class Agent {
         colorHex: String = "6C5CE7",
         mcpServerIDs: [UUID] = [],
         knowledgeBundleIDs: [UUID] = [],
+        webAccessEnabled: Bool = true,
         isDefault: Bool = false
     ) {
         self.id = UUID()
@@ -44,6 +47,7 @@ final class Agent {
         self.colorHex = colorHex
         self.mcpServerIDs = mcpServerIDs
         self.knowledgeBundleIDs = knowledgeBundleIDs
+        self.webAccessEnabled = webAccessEnabled
         self.createdAt = Date()
         self.isDefault = isDefault
     }

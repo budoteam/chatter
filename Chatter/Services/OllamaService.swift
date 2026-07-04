@@ -73,6 +73,34 @@ struct OllamaService: OllamaServiceProtocol {
         }
     }
 
+    // MARK: - Web research
+
+    func webSearch(query: String, maxResults: Int) async throws -> OllamaWebSearchResponse {
+        var request = try makeRequest(path: "/api/web_search", method: "POST")
+        request.httpBody = try JSONEncoder().encode(
+            OllamaWebSearchRequest(query: query, maxResults: maxResults)
+        )
+        let (data, response) = try await session.data(for: request)
+        try Self.validate(response, data: data)
+        do {
+            return try JSONDecoder().decode(OllamaWebSearchResponse.self, from: data)
+        } catch {
+            throw ServiceError.decoding(error.localizedDescription)
+        }
+    }
+
+    func webFetch(url: String) async throws -> OllamaWebFetchResponse {
+        var request = try makeRequest(path: "/api/web_fetch", method: "POST")
+        request.httpBody = try JSONEncoder().encode(OllamaWebFetchRequest(url: url))
+        let (data, response) = try await session.data(for: request)
+        try Self.validate(response, data: data)
+        do {
+            return try JSONDecoder().decode(OllamaWebFetchResponse.self, from: data)
+        } catch {
+            throw ServiceError.decoding(error.localizedDescription)
+        }
+    }
+
     // MARK: - Chat streaming
 
     func streamChat(

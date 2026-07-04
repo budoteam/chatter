@@ -10,6 +10,12 @@ protocol OllamaServiceProtocol {
     /// "vision"]. Used to gate features like image attachments.
     func modelCapabilities(model: String) async throws -> [String]
 
+    /// Web search via ollama.com's research API (built-in web tools).
+    func webSearch(query: String, maxResults: Int) async throws -> OllamaWebSearchResponse
+
+    /// Fetches one web page via ollama.com's research API.
+    func webFetch(url: String) async throws -> OllamaWebFetchResponse
+
     /// Streams a chat completion from `/api/chat`. Emits incremental content
     /// deltas and a final chunk carrying any tool calls + `done`.
     func streamChat(
@@ -24,6 +30,16 @@ extension OllamaServiceProtocol {
     /// Default: no capability info (mocks/tests). The real service overrides
     /// this with a `/api/show` call.
     func modelCapabilities(model: String) async throws -> [String] { [] }
+
+    /// Defaults for mocks/tests; the real service calls ollama.com's web
+    /// research endpoints (used by the built-in web tools).
+    func webSearch(query: String, maxResults: Int) async throws -> OllamaWebSearchResponse {
+        OllamaWebSearchResponse(results: [])
+    }
+
+    func webFetch(url: String) async throws -> OllamaWebFetchResponse {
+        OllamaWebFetchResponse()
+    }
 
     /// One-shot completion: runs a tool-less chat and returns the full
     /// assistant text, dropping `.thinking`/`.toolCalls` chunks. Bound to
