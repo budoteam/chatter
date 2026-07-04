@@ -86,6 +86,24 @@ final class OKFCodecTests: XCTestCase {
         XCTAssertEqual(OKFCodec.serialize(doc), file + "\n")
     }
 
+    func testInlineCommentedKnownKeyIsPreservedVerbatim() {
+        let file = "---\ntype: table # main fact table\n---\n"
+        let doc = OKFCodec.parse(path: "a.md", contents: file)
+        // The typed field stays at its default; the raw line is authoritative.
+        XCTAssertEqual(doc.frontmatter?.type, "unknown")
+        XCTAssertEqual(doc.frontmatter?.extraFields.first?.rawBlock, "type: table # main fact table")
+        XCTAssertTrue(doc.warnings.isEmpty)
+        // No duplicate canonical `type:` line on export.
+        XCTAssertEqual(OKFCodec.serialize(doc), file)
+    }
+
+    func testBlockScalarTypeDoesNotDuplicateOnExport() {
+        let file = "---\ntype: |\n  note\n---\n"
+        let doc = OKFCodec.parse(path: "a.md", contents: file)
+        XCTAssertEqual(OKFCodec.serialize(doc), file)
+        XCTAssertFalse(OKFCodec.serialize(doc).contains("type: unknown"))
+    }
+
     func testDuplicateKnownKeyKeepsSecondOccurrenceVerbatim() {
         let file = "---\ntype: note\ntitle: First\ntitle: Second\n---\n"
         let doc = OKFCodec.parse(path: "a.md", contents: file)
@@ -134,6 +152,18 @@ final class OKFCodecTests: XCTestCase {
         XCTAssertEqual(OKFCodec.serialize(doc), file)
     }
 
+    func testInteriorQuoteTagRoundTrips() {
+        let doc = OKFDocument(
+            relativePath: "a.md", kind: .concept,
+            frontmatter: OKFFrontmatter(type: "note", tags: ["a\"b", "c"]),
+            body: ""
+        )
+        let serialized = OKFCodec.serialize(doc)
+        XCTAssertEqual(serialized, "---\ntype: note\ntags: [\"a\\\"b\", c]\n---\n")
+        let back = OKFCodec.parse(path: "a.md", contents: serialized)
+        XCTAssertEqual(back.frontmatter?.tags, ["a\"b", "c"])
+    }
+
     // MARK: - Reserved files
 
     func testIndexAndLogPassThroughVerbatim() {
@@ -169,6 +199,12 @@ final class OKFCodecTests: XCTestCase {
         let doc = OKFCodec.parse(path: "a.md", contents: "---\ntype: note\nno closing fence\n")
         XCTAssertEqual(doc.frontmatter?.type, "unknown")
         XCTAssertFalse(doc.warnings.isEmpty)
+    }
+
+    func testUTF8BOMIsStripped() {
+        let doc = OKFCodec.parse(path: "a.md", contents: "\u{FEFF}---\ntype: note\n---\n")
+        XCTAssertEqual(doc.frontmatter?.type, "note")
+        XCTAssertTrue(doc.warnings.isEmpty)
     }
 
     func testCRLFIsNormalized() {

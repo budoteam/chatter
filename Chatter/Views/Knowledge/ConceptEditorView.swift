@@ -78,7 +78,7 @@ struct ConceptEditorView: View {
                 TextField("Timestamp (ISO 8601)", text: optional($concept.timestampRaw))
                     .font(.body.monospaced())
                 Button("Now") {
-                    concept.timestampRaw = ISO8601DateFormatter().string(from: .now)
+                    concept.timestampRaw = KnowledgeConcept.currentTimestampString()
                 }
                 .buttonStyle(.borderless)
             }
@@ -123,18 +123,21 @@ struct ConceptEditorView: View {
     }
 
     private func commitPath() {
-        let trimmed = pathDraft.trimmingCharacters(in: .whitespaces)
-        guard pathIssue == nil, trimmed != concept.path else {
-            pathDraft = pathIssue == nil ? pathDraft : concept.path
+        if pathIssue != nil {
+            pathDraft = concept.path
             return
         }
+        let trimmed = pathDraft.trimmingCharacters(in: .whitespaces)
+        guard trimmed != concept.path else { return }
         concept.path = trimmed
         // Reserved names switch the document's role, per the OKF spec.
         let fileName = trimmed.split(separator: "/").last.map(String.init) ?? trimmed
-        switch fileName {
-        case "index": concept.kind = .index
-        case "log": concept.kind = .log
-        default: concept.kind = .concept
+        concept.kind = KnowledgeDocKind.forFileName(fileName + ".md")
+        // A document renamed away from index/log gains frontmatter on export;
+        // make sure it carries a valid (non-empty) type.
+        if concept.kind == .concept,
+           concept.typeName.trimmingCharacters(in: .whitespaces).isEmpty {
+            concept.typeName = "note"
         }
     }
 

@@ -73,7 +73,7 @@ struct AgentEditorView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 ForEach(servers) { server in
-                    Toggle(isOn: binding(for: server.id)) {
+                    Toggle(isOn: membership(of: server.id, in: $selectedServerIDs)) {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(server.name)
                             Text(server.transport.label)
@@ -89,10 +89,10 @@ struct AgentEditorView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 ForEach(knowledgeBundles) { bundle in
-                    Toggle(isOn: bundleBinding(for: bundle.id)) {
+                    Toggle(isOn: membership(of: bundle.id, in: $selectedBundleIDs)) {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(bundle.name)
-                            Text("\(bundle.conceptDocuments.count) concepts")
+                            Text("\(bundle.conceptCount) concepts")
                                 .font(.caption2).foregroundStyle(.secondary)
                         }
                     }
@@ -151,20 +151,11 @@ struct AgentEditorView: View {
         .padding(.vertical, 4)
     }
 
-    private func binding(for id: UUID) -> Binding<Bool> {
+    private func membership(of id: UUID, in set: Binding<Set<UUID>>) -> Binding<Bool> {
         Binding(
-            get: { selectedServerIDs.contains(id) },
+            get: { set.wrappedValue.contains(id) },
             set: { on in
-                if on { selectedServerIDs.insert(id) } else { selectedServerIDs.remove(id) }
-            }
-        )
-    }
-
-    private func bundleBinding(for id: UUID) -> Binding<Bool> {
-        Binding(
-            get: { selectedBundleIDs.contains(id) },
-            set: { on in
-                if on { selectedBundleIDs.insert(id) } else { selectedBundleIDs.remove(id) }
+                if on { set.wrappedValue.insert(id) } else { set.wrappedValue.remove(id) }
             }
         )
     }

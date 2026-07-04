@@ -43,21 +43,22 @@ enum OKFCodec {
     // MARK: - Parse
 
     static func parse(path: String, contents: String) -> OKFDocument {
-        // Line endings are normalized once; export always writes LF.
-        let text = contents.replacingOccurrences(of: "\r\n", with: "\n")
+        // Line endings are normalized once (export always writes LF); a UTF-8
+        // BOM would otherwise hide the opening frontmatter fence.
+        var text = contents.replacingOccurrences(of: "\r\n", with: "\n")
+        if text.hasPrefix("\u{FEFF}") { text.removeFirst() }
         let fileName = path.split(separator: "/").last.map(String.init) ?? path
 
-        if fileName == "index.md" {
+        switch KnowledgeDocKind.forFileName(fileName) {
+        case .index:
             return OKFDocument(relativePath: path, kind: .index, frontmatter: nil, body: text)
-        }
-        if fileName == "log.md" {
+        case .log:
             return OKFDocument(relativePath: path, kind: .log, frontmatter: nil, body: text)
+        case .concept:
+            break
         }
 
-        var lines = text.components(separatedBy: "\n")
-        // `components` yields a trailing "" for a trailing newline; keep track
-        // by working on the raw text offsets instead: find the frontmatter
-        // block line-wise, then take the body as a substring.
+        let lines = text.components(separatedBy: "\n")
         guard lines.first == "---" else {
             return OKFDocument(
                 relativePath: path, kind: .concept,
@@ -80,7 +81,6 @@ enum OKFCodec {
         // Serialization inserts exactly one blank line before a non-empty
         // body; drop it here so the pair stays deterministic.
         if body.hasPrefix("\n") { body.removeFirst() }
-        lines = []  // free
 
         var warnings: [String] = []
         let frontmatter = parseFrontmatter(frontmatterLines, path: path, warnings: &warnings)
@@ -94,7 +94,8 @@ enum OKFCodec {
         _ lines: [String], path: String, warnings: inout [String]
     ) -> OKFFrontmatter {
         var fm = OKFFrontmatter()
-        var seen: Set<String> = []
+        var typed: Set<String> = []
+        var verbatim: Set<String> = []
 
         for block in blocks(from: lines) {
             guard let key = block.key else {
@@ -102,25 +103,28 @@ enum OKFCodec {
                 fm.extraFields.append(OKFExtraField(key: "#", rawBlock: block.raw))
                 continue
             }
-            guard knownKeys.contains(key), !seen.contains(key) else {
-                if seen.contains(key) {
-                    warnings.append("\(path): duplicate key \"\(key)\" kept verbatim")
-                }
+            guard knownKeys.contains(key) else {
+                fm.extraFields.append(OKFExtraField(key: key, rawBlock: block.raw))
+                continue
+            }
+            if typed.contains(key) || verbatim.contains(key) {
+                warnings.append("\(path): duplicate key \"\(key)\" kept verbatim")
                 fm.extraFields.append(OKFExtraField(key: key, rawBlock: block.raw))
                 continue
             }
 
             let inline = block.inlineValue.trimmingCharacters(in: .whitespaces)
-            // Block scalars (| / >) and nested structures under known keys are
-            // beyond the flat subset we model — preserve them verbatim instead
-            // of corrupting them.
-            let isBlockScalar = inline.hasPrefix("|") || inline.hasPrefix(">")
-            let hasContinuation = block.continuationLines.contains { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-            if isBlockScalar || (key != "tags" && hasContinuation) {
+            // Constructs beyond the flat scalar subset we model — block
+            // scalars (| / >), nested values, inline comments — are preserved
+            // verbatim instead of being corrupted. serialize() skips the
+            // canonical line for a verbatim-carried key, so the raw block is
+            // the single source of truth on export.
+            if isBeyondFlatSubset(key: key, inline: inline, continuation: block.continuationLines) {
+                verbatim.insert(key)
                 fm.extraFields.append(OKFExtraField(key: key, rawBlock: block.raw))
                 continue
             }
-            seen.insert(key)
+            typed.insert(key)
 
             switch key {
             case "type": fm.type = unquote(inline)
@@ -133,11 +137,30 @@ enum OKFCodec {
             }
         }
 
-        if fm.type.isEmpty {
-            warnings.append("\(path): missing or empty required \"type\"; treated as \"unknown\"")
+        if !typed.contains("type") && !verbatim.contains("type") {
+            warnings.append("\(path): missing required \"type\"; treated as \"unknown\"")
+            fm.type = "unknown"
+        } else if typed.contains("type"), fm.type.isEmpty {
+            warnings.append("\(path): empty required \"type\"; treated as \"unknown\"")
             fm.type = "unknown"
         }
         return fm
+    }
+
+    /// True when a known key's value can't be represented by our typed fields
+    /// and must be carried verbatim: block scalars, inline comments, and (for
+    /// scalar keys) any non-blank continuation; for `tags`, continuation
+    /// lines that aren't list items.
+    private static func isBeyondFlatSubset(key: String, inline: String, continuation: [String]) -> Bool {
+        if inline.hasPrefix("|") || inline.hasPrefix(">") { return true }
+        if inline.hasPrefix("#") || inline.contains(" #") { return true }
+        if key == "tags" {
+            return continuation.contains { line in
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                return !trimmed.isEmpty && !trimmed.hasPrefix("- ") && trimmed != "-"
+            }
+        }
+        return continuation.contains { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
     }
 
     /// Groups frontmatter lines into blocks: each zero-indent `key:` line
@@ -146,9 +169,10 @@ enum OKFCodec {
     private struct Block {
         var key: String?
         var inlineValue: String = ""
-        var continuationLines: [String] = []
         var rawLines: [String] = []
         var raw: String { rawLines.joined(separator: "\n") }
+        /// Lines after the key line (only meaningful for key blocks).
+        var continuationLines: [String] { Array(rawLines.dropFirst()) }
     }
 
     private static func blocks(from lines: [String]) -> [Block] {
@@ -160,7 +184,6 @@ enum OKFCodec {
                 if let block = current { result.append(block) }
                 current = Block(key: key, inlineValue: value, rawLines: [line])
             } else if current != nil {
-                current!.continuationLines.append(line)
                 current!.rawLines.append(line)
             } else {
                 current = Block(key: nil, rawLines: [line])
@@ -201,15 +224,23 @@ enum OKFCodec {
         }
     }
 
-    /// Splits a flow list body on top-level commas, respecting quotes.
+    /// Splits a flow list body on top-level commas, respecting quotes and
+    /// backslash escapes inside double quotes.
     private static func splitFlowList(_ text: String) -> [String] {
         var items: [String] = []
         var current = ""
         var quote: Character?
+        var escaped = false
         for ch in text {
             if let q = quote {
                 current.append(ch)
-                if ch == q { quote = nil }
+                if escaped {
+                    escaped = false
+                } else if q == "\"", ch == "\\" {
+                    escaped = true
+                } else if ch == q {
+                    quote = nil
+                }
             } else if ch == "\"" || ch == "'" {
                 quote = ch
                 current.append(ch)
@@ -249,7 +280,16 @@ enum OKFCodec {
         case .concept:
             let fm = doc.frontmatter ?? OKFFrontmatter()
             var lines: [String] = ["---"]
-            lines.append("type: \(quoteIfNeeded(fm.type))")
+            // A `type` carried verbatim in extraFields (block scalar, inline
+            // comment) must not also be emitted canonically — that would
+            // duplicate the key. The typed field is at its "absent" default
+            // in exactly that case.
+            let extraKeys = Set(fm.extraFields.map(\.key))
+            let typeCarriedVerbatim = extraKeys.contains("type")
+                && (fm.type.isEmpty || fm.type == "unknown")
+            if !typeCarriedVerbatim {
+                lines.append("type: \(quoteIfNeeded(fm.type))")
+            }
             if let title = fm.title, !title.isEmpty {
                 lines.append("title: \(quoteIfNeeded(title))")
             }
@@ -291,8 +331,11 @@ enum OKFCodec {
             || value.contains(": ") || value.contains(" #")
             || value.hasSuffix(":")
         if inFlowList {
+            // Interior quotes must be escaped inside a flow list, or the
+            // re-parse merges neighboring items.
             needsQuoting = needsQuoting || value.contains(",")
                 || value.contains("[") || value.contains("]")
+                || value.contains("\"") || value.contains("'")
         }
         guard needsQuoting else { return value }
         let escaped = value

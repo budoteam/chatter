@@ -155,7 +155,7 @@ struct SidebarView: View {
                             Text(bundle.name)
                                 .font(.subheadline.weight(.medium))
                                 .lineLimit(1)
-                            Text("\(bundle.conceptDocuments.count) concepts")
+                            Text("\(bundle.conceptCount) concepts")
                                 .font(.caption2).foregroundStyle(.secondary)
                         }
                         Spacer(minLength: 0)
@@ -262,6 +262,12 @@ struct SidebarView: View {
 
     private func delete(_ bundle: KnowledgeBundle) {
         if openBundle == bundle { openBundle = nil }
+        // Scrub the soft references so agents don't keep dangling bundle IDs
+        // (they'd silently lose their knowledge tools with no UI trace).
+        let allAgents = (try? context.fetch(FetchDescriptor<Agent>())) ?? []
+        for agent in allAgents where agent.knowledgeBundleIDs.contains(bundle.id) {
+            agent.knowledgeBundleIDs.removeAll { $0 == bundle.id }
+        }
         context.delete(bundle)
         try? context.save()
     }
@@ -271,14 +277,7 @@ struct SidebarView: View {
         case .success(let url):
             do {
                 let report = try KnowledgeTransfer.importBundle(from: url, into: context)
-                var text = report.summary
-                if !report.warnings.isEmpty {
-                    text += "\n\nWarnings:\n" + report.warnings.prefix(8).joined(separator: "\n")
-                    if report.warnings.count > 8 {
-                        text += "\n(\(report.warnings.count - 8) more)"
-                    }
-                }
-                knowledgeImportReport = text
+                knowledgeImportReport = report.alertText
             } catch {
                 knowledgeImportReport = "Import failed: \(error.localizedDescription)"
             }

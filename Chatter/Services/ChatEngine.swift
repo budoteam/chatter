@@ -47,9 +47,20 @@ final class ChatEngine {
                 parameters: $0.parameters
             ))
         }
-        // Built-in knowledge tools for this agent's assigned bundles.
+        // Built-in knowledge tools for this agent's assigned bundles. Dispatch
+        // below routes by the exact names offered here, so MCP tools that
+        // happen to be namespaced "knowledge__…" (a server named "Knowledge")
+        // are only shadowed when the built-ins are actually active.
         let knowledgeBundleIDs = agent?.knowledgeBundleIDs ?? []
-        tools += knowledge.tools(bundleIDs: knowledgeBundleIDs, context: context)
+        let knowledgeTools = knowledge.tools(bundleIDs: knowledgeBundleIDs, context: context)
+        let knowledgeToolNames = Set(knowledgeTools.map(\.function.name))
+        tools += knowledgeTools
+
+        // The knowledge overview is stable within one send; compute it once
+        // instead of per tool-loop iteration (it fetches and walks bundles).
+        let knowledgeSection = knowledge.systemPromptSection(
+            bundleIDs: knowledgeBundleIDs, context: context
+        )
 
         var iteration = 0
         while iteration < maxToolIterations {
@@ -59,7 +70,10 @@ final class ChatEngine {
             // Rebuilt every iteration, so the timestamp stays current across
             // long tool loops.
             var msgs: [OllamaChatMessage] = [
-                OllamaChatMessage(role: "system", content: systemPrompt(for: agent, context: context))
+                OllamaChatMessage(
+                    role: "system",
+                    content: Self.systemPrompt(for: agent, knowledgeSection: knowledgeSection)
+                )
             ]
             msgs.append(contentsOf: session.orderedMessages.map(Self.toOllama))
 
@@ -147,7 +161,7 @@ final class ChatEngine {
                 let argsJSON = call.function.arguments.jsonString
                 let result: String
                 do {
-                    if knowledge.canHandle(name) {
+                    if knowledgeToolNames.contains(name) {
                         result = try knowledge.call(
                             namespacedName: name, argumentsJSON: argsJSON,
                             bundleIDs: knowledgeBundleIDs, context: context
@@ -185,16 +199,12 @@ final class ChatEngine {
 
     /// The agent's system prompt plus its knowledge-base overview, always
     /// ending with the current date & time.
-    private func systemPrompt(for agent: Agent?, context: ModelContext) -> String {
-        let timestamp = "Current Date and Time: \(Self.timestampFormatter.string(from: Date()))"
+    private static func systemPrompt(for agent: Agent?, knowledgeSection: String?) -> String {
+        let timestamp = "Current Date and Time: \(timestampFormatter.string(from: Date()))"
         var parts: [String] = []
         let prompt = agent?.systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if !prompt.isEmpty { parts.append(prompt) }
-        if let overview = knowledge.systemPromptSection(
-            bundleIDs: agent?.knowledgeBundleIDs ?? [], context: context
-        ) {
-            parts.append(overview)
-        }
+        if let knowledgeSection { parts.append(knowledgeSection) }
         parts.append(timestamp)
         return parts.joined(separator: "\n\n")
     }

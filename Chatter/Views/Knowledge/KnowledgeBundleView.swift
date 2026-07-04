@@ -210,14 +210,7 @@ struct KnowledgeBundleView: View {
                 let report = try KnowledgeTransfer.importBundle(
                     from: url, into: context, mergingInto: bundle
                 )
-                var text = report.summary
-                if !report.warnings.isEmpty {
-                    text += "\n\nWarnings:\n" + report.warnings.prefix(8).joined(separator: "\n")
-                    if report.warnings.count > 8 {
-                        text += "\n(\(report.warnings.count - 8) more)"
-                    }
-                }
-                importReport = text
+                importReport = report.alertText
             } catch {
                 importReport = "Import failed: \(error.localizedDescription)"
             }

@@ -35,6 +35,12 @@ final class KnowledgeBundle {
         orderedConcepts.filter { $0.kind == .concept }
     }
 
+    /// Count of non-reserved documents without the sort `conceptDocuments`
+    /// pays — list rows render this on every sidebar refresh.
+    var conceptCount: Int {
+        (concepts ?? []).lazy.filter { $0.kind == .concept }.count
+    }
+
     func concept(atPath path: String) -> KnowledgeConcept? {
         (concepts ?? []).first { $0.path == path }
     }

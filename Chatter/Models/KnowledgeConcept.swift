@@ -9,6 +9,16 @@ enum KnowledgeDocKind: String, Codable, CaseIterable {
     case index
     /// A reserved `log.md` change history (no frontmatter).
     case log
+
+    /// The OKF reserved-filename rule, shared by the codec and the editor:
+    /// `index.md` and `log.md` (at any directory level) are reserved.
+    static func forFileName(_ fileName: String) -> KnowledgeDocKind {
+        switch fileName {
+        case "index.md": return .index
+        case "log.md": return .log
+        default: return .concept
+        }
+    }
 }
 
 /// A verbatim-preserved frontmatter key the app doesn't model, so foreign
@@ -99,13 +109,23 @@ final class KnowledgeConcept {
         }
     }
 
+    // ISO8601DateFormatter is thread-safe; cache instead of per-access allocation.
+    private static let isoFormatter = ISO8601DateFormatter()
+    private static let isoFractionalFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    /// The current time in the exact format the app writes to `timestamp`.
+    static func currentTimestampString() -> String {
+        isoFormatter.string(from: .now)
+    }
+
     /// Parsed `timestamp`, when the stored string is valid ISO 8601.
     var timestamp: Date? {
         guard let raw = timestampRaw else { return nil }
-        let withFraction = ISO8601DateFormatter()
-        withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = withFraction.date(from: raw) { return date }
-        return ISO8601DateFormatter().date(from: raw)
+        return Self.isoFractionalFormatter.date(from: raw) ?? Self.isoFormatter.date(from: raw)
     }
 
     /// Display name: frontmatter title, else the last path component.

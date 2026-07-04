@@ -13,7 +13,6 @@ final class KnowledgeToolProvider {
     static let listToolName = "knowledge__list"
     static let readToolName = "knowledge__read"
 
-    private static let toolPrefix = "knowledge__"
     /// Keeps the system-prompt overview from crowding out the conversation.
     private static let overviewCharacterLimit = 3_000
     /// Keeps a single tool result within a sane share of the context window.
@@ -37,7 +36,9 @@ final class KnowledgeToolProvider {
 
     /// A compact listing of the agent's bundles (root index contents, or a
     /// generated listing), capped so large knowledge bases don't blow up the
-    /// prompt. Returns nil when the agent has no (resolvable) bundles.
+    /// prompt. Every bundle contributes at least its name; oversized indexes
+    /// are cut to the remaining budget. Returns nil when the agent has no
+    /// (resolvable) bundles.
     func systemPromptSection(bundleIDs: [UUID], context: ModelContext) -> String? {
         let bundles = bundles(for: bundleIDs, context: context)
         guard !bundles.isEmpty else { return nil }
@@ -49,18 +50,29 @@ final class KnowledgeToolProvider {
         answering questions its contents could inform.
         """
         for bundle in bundles {
-            var section = "\n\n## Knowledge bundle: \(bundle.name)\n"
-            let index = bundle.concept(atPath: "index")?.body
-                ?? KnowledgeTransfer.generatedRootIndex(for: bundle)
-            section += index.trimmingCharacters(in: .whitespacesAndNewlines)
-
-            if text.count + section.count > Self.overviewCharacterLimit {
-                text += "\n\n(Overview truncated — use \(Self.listToolName) to see the rest.)"
-                break
+            text += "\n\n## Knowledge bundle: \(bundle.name)\n"
+            let remaining = Self.overviewCharacterLimit - text.count
+            guard remaining > 80 else {
+                text += "(Use \(Self.listToolName) to browse this bundle.)"
+                continue
             }
-            text += section
+            let index = rootIndexText(for: bundle)
+            if index.count <= remaining {
+                text += index
+            } else {
+                text += String(index.prefix(remaining))
+                    + "\n(… overview truncated — use \(Self.listToolName) for the rest.)"
+            }
         }
         return text
+    }
+
+    /// The bundle's stored root `index.md`, else a generated listing — the
+    /// single fallback rule shared by the prompt overview and knowledge__list.
+    private func rootIndexText(for bundle: KnowledgeBundle) -> String {
+        (bundle.concept(atPath: "index")?.body
+            ?? KnowledgeTransfer.generatedRootIndex(for: bundle))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     // MARK: - Tool definitions
@@ -106,12 +118,11 @@ final class KnowledgeToolProvider {
         ]
     }
 
-    func canHandle(_ namespacedName: String) -> Bool {
-        namespacedName.hasPrefix(Self.toolPrefix)
-    }
-
     // MARK: - Dispatch
 
+    /// ChatEngine routes here only for the exact tool names `tools(…)`
+    /// offered, so MCP tools that happen to share the "knowledge__" prefix
+    /// (a server named "Knowledge") are never hijacked.
     func call(
         namespacedName: String,
         argumentsJSON: String,
@@ -119,6 +130,11 @@ final class KnowledgeToolProvider {
         context: ModelContext
     ) throws -> String {
         let bundles = bundles(for: bundleIDs, context: context)
+        guard !bundles.isEmpty else {
+            // Bundles can vanish mid-turn (deleted locally or via sync);
+            // never hand the model an empty result with no explanation.
+            return "No knowledge bundles are currently available for this agent."
+        }
         let args = arguments(from: argumentsJSON)
 
         switch namespacedName {
@@ -156,16 +172,12 @@ final class KnowledgeToolProvider {
 
         // Root overview: stored root index per bundle, else a generated one.
         return bundles.map { bundle in
-            let index = bundle.concept(atPath: "index")?.body
-                ?? KnowledgeTransfer.generatedRootIndex(for: bundle)
-            return "# Bundle: \(bundle.name)\n"
-                + index.trimmingCharacters(in: .whitespacesAndNewlines)
+            "# Bundle: \(bundle.name)\n" + rootIndexText(for: bundle)
         }
         .joined(separator: "\n\n")
     }
 
     private func search(query: String, bundles: [KnowledgeBundle]) -> String {
-        let needle = query.lowercased()
         var strong: [String] = []  // hits in id/title/type/tags/description
         var weak: [String] = []    // body-only hits
 
@@ -176,11 +188,12 @@ final class KnowledgeToolProvider {
                         + concept.tags
                 )
                 .joined(separator: " ")
-                .lowercased()
                 let line = entryLine(for: concept, in: bundle, qualify: bundles.count > 1)
-                if metadata.contains(needle) {
+                // range(of:options:) avoids allocating lowercased copies of
+                // every body on each search call.
+                if metadata.range(of: query, options: .caseInsensitive) != nil {
                     strong.append(line)
-                } else if concept.body.lowercased().contains(needle) {
+                } else if concept.body.range(of: query, options: .caseInsensitive) != nil {
                     weak.append(line)
                 }
             }
@@ -218,15 +231,24 @@ final class KnowledgeToolProvider {
             bundle.concept(atPath: id).map { (bundle, $0) }
         }
 
-        guard let (bundle, concept) = matches.first else {
+        guard var chosen = matches.first else {
             throw ToolError.conceptNotFound(conceptID)
         }
+        var note = ""
         if matches.count > 1 {
-            let names = matches.map { $0.0.name }.joined(separator: ", ")
-            return "Concept “\(id)” exists in several bundles (\(names)). Call again with the `bundle` argument."
+            let names = Set(matches.map { $0.0.name })
+            if bundleName == nil, names.count > 1 {
+                return "Concept “\(id)” exists in several bundles (\(names.sorted().joined(separator: ", "))). Call again with the `bundle` argument."
+            }
+            // Same-named bundles can't be told apart by the `bundle`
+            // argument; read the freshest copy instead of looping on an
+            // unresolvable ambiguity message.
+            chosen = matches.max { $0.1.updatedAt < $1.1.updatedAt } ?? chosen
+            note = "Note: \(matches.count) documents share this id; showing the most recently updated.\n\n"
         }
+        let (bundle, concept) = chosen
 
-        var text = "Concept: \(concept.path) (bundle: \(bundle.name))\n\n"
+        var text = note + "Concept: \(concept.path) (bundle: \(bundle.name))\n\n"
         text += KnowledgeTransfer.serializedContents(for: concept)
         if text.count > Self.readCharacterLimit {
             let overflow = text.count - Self.readCharacterLimit

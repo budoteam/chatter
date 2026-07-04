@@ -17,6 +17,19 @@ enum KnowledgeTransfer {
             if skipped > 0 { text += " Skipped \(skipped) non-markdown file\(skipped == 1 ? "" : "s")." }
             return text
         }
+
+        /// Summary plus a capped warning list — the one alert body every
+        /// import surface shows.
+        var alertText: String {
+            var text = summary
+            if !warnings.isEmpty {
+                text += "\n\nWarnings:\n" + warnings.prefix(8).joined(separator: "\n")
+                if warnings.count > 8 {
+                    text += "\n(\(warnings.count - 8) more)"
+                }
+            }
+            return text
+        }
     }
 
     enum TransferError: LocalizedError {
@@ -54,6 +67,13 @@ enum KnowledgeTransfer {
         let bundle = existing ?? KnowledgeBundle(name: folderURL.lastPathComponent)
         report.bundleName = bundle.name
 
+        // Path-keyed lookup so merge-import stays linear instead of scanning
+        // the concepts array per file.
+        var conceptsByPath: [String: KnowledgeConcept] = [:]
+        for concept in bundle.concepts ?? [] {
+            conceptsByPath[concept.path] = concept
+        }
+
         let basePath = folderURL.standardizedFileURL.path
         for case let fileURL as URL in enumerator {
             guard (try? fileURL.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
@@ -77,13 +97,15 @@ enum KnowledgeTransfer {
             report.warnings.append(contentsOf: doc.warnings)
 
             let conceptPath = String(relativePath.dropLast(3))  // strip ".md"
-            let concept = bundle.concept(atPath: conceptPath)
-                ?? {
-                    let fresh = KnowledgeConcept(path: conceptPath)
-                    fresh.bundle = bundle
-                    context.insert(fresh)
-                    return fresh
-                }()
+            let concept: KnowledgeConcept
+            if let existing = conceptsByPath[conceptPath] {
+                concept = existing
+            } else {
+                concept = KnowledgeConcept(path: conceptPath)
+                concept.bundle = bundle
+                context.insert(concept)
+                conceptsByPath[conceptPath] = concept
+            }
             apply(doc, to: concept)
             report.imported += 1
         }
