@@ -1,4 +1,65 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#else
+import UIKit
+#endif
+
+// MARK: - Pasteboard
+
+enum Pasteboard {
+    static func copy(_ text: String) {
+        #if os(macOS)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        #else
+        UIPasteboard.general.string = text
+        #endif
+    }
+}
+
+// MARK: - Message actions (resend / copy / delete)
+
+/// Subtle icon row shown under a message. `onResend` is optional — pass nil
+/// to omit the resend/regenerate action.
+struct MessageActionBar: View {
+    var onResend: (() -> Void)?
+    let onCopy: () -> Void
+    let onDelete: () -> Void
+
+    @State private var copied = false
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if let onResend {
+                actionButton("arrow.clockwise", help: "Resend") { onResend() }
+            }
+            actionButton(copied ? "checkmark" : "doc.on.doc", help: "Copy") {
+                onCopy()
+                copied = true
+                Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(1.5))
+                    copied = false
+                }
+            }
+            actionButton("trash", help: "Delete") { onDelete() }
+        }
+        .foregroundStyle(.tertiary)
+    }
+
+    private func actionButton(
+        _ systemImage: String, help: String, action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 11, weight: .medium))
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+    }
+}
 
 // MARK: - User
 

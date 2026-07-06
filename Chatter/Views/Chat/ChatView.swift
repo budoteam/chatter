@@ -140,12 +140,31 @@ struct ChatView: View {
     private func transcriptItemView(_ item: TranscriptItem) -> some View {
         switch item {
         case .user(let message):
-            UserBubble(message: message)
+            VStack(alignment: .trailing, spacing: 2) {
+                UserBubble(message: message)
+                actionBar(for: message)
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
         case .activity(let steps, let live):
             ActivityGroupView(steps: steps, live: live)
         case .answer(let message):
-            AssistantMessage(message: message)
+            VStack(alignment: .leading, spacing: 2) {
+                AssistantMessage(message: message)
+                if !message.isStreaming {
+                    // Indented past the agent badge so it aligns with the text.
+                    actionBar(for: message).padding(.leading, 36)
+                }
+            }
         }
+    }
+
+    /// Resend (redo from here) / copy / delete under a message.
+    private func actionBar(for message: Message) -> some View {
+        MessageActionBar(
+            onResend: { viewModel.resend(from: message, env: env, session: session, context: context) },
+            onCopy: { Pasteboard.copy(message.content) },
+            onDelete: { viewModel.delete(message, context: context) }
+        )
     }
 
     private let bottomID = "bottom-anchor"

@@ -49,6 +49,25 @@ final class ChatEngine {
         session.updatedAt = .now
         try? context.save()
 
+        try await runTurns(model: model, session: session, agent: agent, context: context)
+    }
+
+    /// Re-runs the assistant turn on the existing history — no new user
+    /// message is appended (message resend/regenerate).
+    func regenerate(session: ChatSession, agent: Agent?, context: ModelContext) async throws {
+        let model = resolveModel(agent: agent, session: session)
+        guard !model.isEmpty else { throw EngineError.noModel }
+        session.modelId = model
+        try await runTurns(model: model, session: session, agent: agent, context: context)
+    }
+
+    /// The agentic tool loop: stream → run requested tools → stream again.
+    private func runTurns(
+        model: String,
+        session: ChatSession,
+        agent: Agent?,
+        context: ModelContext
+    ) async throws {
         // Tool schemas for this agent's allowed servers.
         let resolved = mcp.tools(forServerIDs: agent?.mcpServerIDs ?? [])
         var tools = resolved.map {
