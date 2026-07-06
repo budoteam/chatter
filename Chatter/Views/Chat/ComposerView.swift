@@ -59,16 +59,15 @@ struct ComposerView: View {
                 // keyboards (iPad) Shift+Return inserts a line break instead
                 // of also submitting.
                 .onKeyPress(phases: .down) { press in
-                    guard press.key == .return, press.modifiers.contains(.shift) else {
-                        return .ignored
+                    if press.key == .return, press.modifiers.contains(.shift) {
+                        suppressNextSubmit = true
+                        insertNewlineAtCursor()
+                        return .handled
                     }
-                    suppressNextSubmit = true
-                    (UIResponder.currentFirst as? UIKeyInput)?.insertText("\n")
-                    // onSubmit fires synchronously from the insertion above;
-                    // clear afterwards in case it didn't, so a later real
-                    // Return isn't swallowed.
-                    Task { @MainActor in suppressNextSubmit = false }
-                    return .handled
+                    // Any other key invalidates a stale suppress so a real
+                    // Return is never swallowed.
+                    suppressNextSubmit = false
+                    return .ignored
                 }
                 .onSubmit {
                     if suppressNextSubmit {
@@ -219,6 +218,20 @@ struct ComposerView: View {
     }
 
     // MARK: - Send / stop
+
+    #if os(iOS)
+    /// Inserts "\n" at the cursor WITHOUT `insertText` — SwiftUI treats an
+    /// inserted newline as Return and fires onSubmit. `UITextInput.replace`
+    /// is the programmatic-edit path and bypasses submit detection.
+    private func insertNewlineAtCursor() {
+        if let input = UIResponder.currentFirst as? UITextInput,
+           let range = input.selectedTextRange {
+            input.replace(range, withText: "\n")
+        } else {
+            viewModel.inputText += "\n"
+        }
+    }
+    #endif
 
     /// Sends (or stops) and keeps the input field focused so the user can
     /// type the next message right away — button clicks (macOS) and the send
