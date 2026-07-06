@@ -44,7 +44,12 @@ struct RootView: View {
         // On iPhone (compact), surface the detail column when the user picks a
         // screen or opens a chat; on regular widths both columns stay visible.
         .onChange(of: env.mainScreen) { preferredColumn = .detail }
-        .onChange(of: env.selectedSession?.id) { preferredColumn = .detail }
+        // Only when a session becomes selected — deselection (nil) also fires
+        // this on back-pop, and forcing .detail then would show WelcomeView
+        // instead of letting the pop reach the sidebar.
+        .onChange(of: env.selectedSession?.id) { _, newID in
+            if newID != nil { preferredColumn = .detail }
+        }
         #if os(macOS)
         .frame(minWidth: 860, minHeight: 560)
         #endif

@@ -88,6 +88,14 @@ struct ComposerView: View {
         .task(id: currentModel) {
             supportsVision = await env.supportsVision(currentModel)
         }
+        // A fresh chat should be ready to type into immediately. ChatView is
+        // re-created per session (.id(session.id)), so this fires once per
+        // newly opened chat; the deferred hop is needed because focusing
+        // during the appearance transaction is ignored on iOS.
+        .onAppear {
+            guard (session.messages ?? []).isEmpty else { return }
+            Task { @MainActor in focused = true }
+        }
         .onChange(of: photoItems) { _, items in
             guard !items.isEmpty else { return }
             Task { await loadPickedImages(items) }
