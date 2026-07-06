@@ -9,6 +9,7 @@ struct RootView: View {
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var preferredColumn: NavigationSplitViewColumn = .sidebar
     @State private var showSettings = false
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         @Bindable var env = env
@@ -58,6 +59,15 @@ struct RootView: View {
         }
         .onChange(of: env.newSessionRequestID) { startNewSession() }
         .onChange(of: env.hasAPIKey) { Task { await env.refreshModels() } }
+        #if os(iOS)
+        // iOS suspension silently kills MCP sockets while the clients still
+        // report connected — every tool call would then hang. Rebuild the
+        // sessions whenever the app returns to the foreground.
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            Task { await env.mcp.refreshConnections(configs: allServers()) }
+        }
+        #endif
     }
 
     private func startNewSession() {

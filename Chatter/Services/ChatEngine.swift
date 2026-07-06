@@ -102,6 +102,7 @@ final class ChatEngine {
         var iteration = 0
         while true {
             iteration += 1
+            try Task.checkCancellation()
             // Tool budget exhausted → withhold the tools so the model has to
             // answer in text (summarizing how far it got) instead of the turn
             // ending without any reply.
@@ -201,6 +202,9 @@ final class ChatEngine {
             try? context.save()
 
             for call in toolCalls {
+                // Stop must abort the turn even between/while tool calls —
+                // a swallowed CancellationError would keep the loop running.
+                try Task.checkCancellation()
                 let name = call.function.name
                 let argsJSON = call.function.arguments.jsonString
                 let result: String
@@ -215,6 +219,8 @@ final class ChatEngine {
                     } else {
                         result = try await mcp.callTool(namespacedName: name, argumentsJSON: argsJSON)
                     }
+                } catch is CancellationError {
+                    throw CancellationError()
                 } catch {
                     result = "Tool error: \(error.localizedDescription)"
                 }

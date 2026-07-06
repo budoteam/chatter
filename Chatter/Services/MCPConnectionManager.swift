@@ -71,9 +71,23 @@ final class MCPConnectionManager: MCPClientProtocol {
         }
     }
 
+    /// Tears down all live sessions and reconnects the enabled ones. Used on
+    /// iOS when returning to the foreground: suspension kills the sockets
+    /// while the clients still report connected, so every tool call would
+    /// hang until the app is force-quit.
+    func refreshConnections(configs: [MCPServerConfig]) async {
+        for id in Array(clients.keys) {
+            await disconnect(serverID: id)
+        }
+        await syncConnections(configs: configs)
+    }
+
     func disconnect(serverID: UUID) async {
         if let client = clients[serverID] {
-            await client.disconnect()
+            // Bounded: disconnecting over a dead socket must not hang either.
+            try? await Self.withHardTimeout(seconds: 5, label: "disconnect") {
+                await client.disconnect()
+            }
         }
         clients[serverID] = nil
         // Purge this server's tools from the registry.
@@ -94,17 +108,58 @@ final class MCPConnectionManager: MCPClientProtocol {
         ids.flatMap { toolsByServer[$0] ?? [] }
     }
 
+    /// Hard ceiling for a single tool call. Dead transports (iOS suspends the
+    /// app and its sockets die silently while the client still reports
+    /// connected) would otherwise hang a call forever.
+    private static let toolCallTimeout: TimeInterval = 60
+
     func callTool(namespacedName: String, argumentsJSON: String) async throws -> String {
         guard let entry = registry[namespacedName], let client = clients[entry.serverID] else {
             throw MCPError.toolUnavailable(namespacedName)
         }
         let arguments = Self.mcpArguments(from: argumentsJSON)
-        let (content, isError) = try await client.callTool(name: entry.original, arguments: arguments)
+        let (content, isError) = try await Self.withHardTimeout(
+            seconds: Self.toolCallTimeout, label: namespacedName
+        ) {
+            try await client.callTool(name: entry.original, arguments: arguments)
+        }
         let text = Self.text(from: content)
         if isError == true {
             return "Tool error: \(text)"
         }
         return text.isEmpty ? "(no output)" : text
+    }
+
+    /// Awaits `operation` but is guaranteed to resume: with its result, with
+    /// `MCPError.toolTimeout` after `seconds`, or with `CancellationError`
+    /// when the calling task is cancelled — even if the underlying SDK call
+    /// never honors cancellation (hung network call on a dead socket). A hung
+    /// operation task may linger in the background, but the caller unblocks.
+    private static func withHardTimeout<T: Sendable>(
+        seconds: TimeInterval,
+        label: String,
+        operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        let race = HardTimeoutRace<T>()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { cont in
+                race.store(cont)
+                race.work = Task {
+                    do { race.finish(.success(try await operation())) }
+                    catch { race.finish(.failure(error)) }
+                }
+                race.timer = Task {
+                    try? await Task.sleep(for: .seconds(seconds))
+                    race.finish(.failure(MCPError.toolTimeout(label)))
+                }
+                // onCancel may have fired before the continuation was stored.
+                if Task.isCancelled {
+                    race.finish(.failure(CancellationError()))
+                }
+            }
+        } onCancel: {
+            race.finish(.failure(CancellationError()))
+        }
     }
 
     // MARK: - Transport construction
@@ -202,11 +257,37 @@ final class MCPConnectionManager: MCPClientProtocol {
         return "\(String(slug))__\(tool)"
     }
 
+    /// Resume-exactly-once bookkeeping for `withHardTimeout` (Swift doesn't
+    /// allow nested types inside generic functions).
+    private final class HardTimeoutRace<T: Sendable>: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<T, Error>?
+        var work: Task<Void, Never>?
+        var timer: Task<Void, Never>?
+
+        func store(_ c: CheckedContinuation<T, Error>) {
+            lock.lock(); continuation = c; lock.unlock()
+        }
+
+        /// Resumes the continuation exactly once; later calls are no-ops.
+        func finish(_ result: Result<T, Error>) {
+            lock.lock()
+            let c = continuation
+            continuation = nil
+            lock.unlock()
+            guard let c else { return }
+            work?.cancel()
+            timer?.cancel()
+            c.resume(with: result)
+        }
+    }
+
     enum MCPError: LocalizedError {
         case badURL(String)
         case badCommand
         case stdioUnsupported
         case toolUnavailable(String)
+        case toolTimeout(String)
 
         var errorDescription: String? {
             switch self {
@@ -214,6 +295,7 @@ final class MCPConnectionManager: MCPClientProtocol {
             case .badCommand: return "Missing stdio command."
             case .stdioUnsupported: return "stdio MCP servers need an unsandboxed macOS build (not available in TestFlight/App Store builds)."
             case .toolUnavailable(let name): return "Tool '\(name)' is not available."
+            case .toolTimeout(let name): return "Tool '\(name)' timed out — the server may be unreachable."
             }
         }
     }
