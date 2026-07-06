@@ -18,11 +18,13 @@ protocol OllamaServiceProtocol {
 
     /// Streams a chat completion from `/api/chat`. Emits incremental content
     /// deltas and a final chunk carrying any tool calls + `done`.
+    /// `think` requests/suppresses the model's reasoning mode (nil = default).
     func streamChat(
         model: String,
         messages: [OllamaChatMessage],
         tools: [OllamaTool],
-        temperature: Double
+        temperature: Double,
+        think: OllamaThinkValue?
     ) -> AsyncThrowingStream<OllamaChatChunk, Error>
 }
 
@@ -39,6 +41,16 @@ extension OllamaServiceProtocol {
 
     func webFetch(url: String) async throws -> OllamaWebFetchResponse {
         OllamaWebFetchResponse()
+    }
+
+    /// Short form without a thinking override.
+    func streamChat(
+        model: String,
+        messages: [OllamaChatMessage],
+        tools: [OllamaTool],
+        temperature: Double
+    ) -> AsyncThrowingStream<OllamaChatChunk, Error> {
+        streamChat(model: model, messages: messages, tools: tools, temperature: temperature, think: nil)
     }
 
     /// One-shot completion: runs a tool-less chat and returns the full

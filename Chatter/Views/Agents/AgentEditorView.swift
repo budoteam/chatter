@@ -22,6 +22,8 @@ struct AgentEditorView: View {
     @State private var selectedServerIDs: Set<UUID> = []
     @State private var selectedBundleIDs: Set<UUID> = []
     @State private var webAccess = true
+    @State private var thinkingMode: ThinkingMode = .standard
+    @State private var supportsThinking = false
 
     private let icons = ["sparkles", "brain", "bolt.fill", "wand.and.stars", "cpu",
                          "message.fill", "book.fill", "chevron.left.forwardslash.chevron.right",
@@ -61,6 +63,23 @@ struct AgentEditorView: View {
                     }
                     Slider(value: $temperature, in: 0...1, step: 0.1)
                 }
+            }
+
+            Section {
+                Picker("Thinking", selection: $thinkingMode) {
+                    ForEach(ThinkingMode.allCases) { mode in
+                        Text(mode.label).tag(mode)
+                    }
+                }
+            } header: {
+                Text("Reasoning")
+            } footer: {
+                Text(supportsThinking
+                    ? "Controls the model's reasoning trace. Low/Medium/High are for models like gpt-oss that require an effort level."
+                    : "The selected model doesn't report thinking support — this setting is ignored.")
+            }
+            .task(id: modelId) {
+                supportsThinking = await env.supports("thinking", model: modelId)
             }
 
             Section("System Prompt") {
@@ -197,6 +216,7 @@ struct AgentEditorView: View {
         selectedServerIDs = Set(agent.mcpServerIDs)
         selectedBundleIDs = Set(agent.knowledgeBundleIDs)
         webAccess = agent.webAccessEnabled
+        thinkingMode = agent.thinkingMode
     }
 
     private func save() {
@@ -210,6 +230,7 @@ struct AgentEditorView: View {
         target.mcpServerIDs = Array(selectedServerIDs)
         target.knowledgeBundleIDs = Array(selectedBundleIDs)
         target.webAccessEnabled = webAccess
+        target.thinkingMode = thinkingMode
         if agent == nil {
             context.insert(target)
         }

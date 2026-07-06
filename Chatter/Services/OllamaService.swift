@@ -107,7 +107,8 @@ struct OllamaService: OllamaServiceProtocol {
         model: String,
         messages: [OllamaChatMessage],
         tools: [OllamaTool],
-        temperature: Double
+        temperature: Double,
+        think: OllamaThinkValue?
     ) -> AsyncThrowingStream<OllamaChatChunk, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
@@ -118,6 +119,7 @@ struct OllamaService: OllamaServiceProtocol {
                         messages: messages,
                         tools: tools.isEmpty ? nil : tools,
                         stream: true,
+                        think: think,
                         options: .init(temperature: temperature)
                     )
                     request.httpBody = try JSONEncoder().encode(body)

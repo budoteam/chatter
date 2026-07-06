@@ -133,7 +133,8 @@ final class ChatEngine {
             do {
                 for try await chunk in ollama.streamChat(
                     model: model, messages: msgs, tools: finalRound ? [] : tools,
-                    temperature: agent?.temperature ?? 0.7
+                    temperature: agent?.temperature ?? 0.7,
+                    think: agent?.thinkingMode.ollamaValue
                 ) {
                     switch chunk {
                     case .delta(let piece): pendingContent += piece

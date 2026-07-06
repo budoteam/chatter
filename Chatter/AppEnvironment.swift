@@ -73,20 +73,25 @@ final class AppEnvironment {
         }
     }
 
-    /// Whether `model` supports image input. Best-effort and cached: on any
-    /// failure (or missing `/api/show`) it returns false so the image button
-    /// stays disabled rather than sending images a model would ignore.
-    func supportsVision(_ model: String) async -> Bool {
+    /// Whether `model` reports `capability` via `/api/show`. Best-effort and
+    /// cached: on any failure it returns false so gated features stay off
+    /// rather than sending requests a model would ignore.
+    func supports(_ capability: String, model: String) async -> Bool {
         guard !model.isEmpty else { return false }
-        if let cached = modelCapabilities[model] { return cached.contains("vision") }
+        if let cached = modelCapabilities[model] { return cached.contains(capability) }
         guard hasAPIKey else { return false }
         do {
             let caps = Set(try await ollama.modelCapabilities(model: model).map { $0.lowercased() })
             modelCapabilities[model] = caps
-            return caps.contains("vision")
+            return caps.contains(capability)
         } catch {
             AppLogger.api.error("modelCapabilities failed for \(model, privacy: .public): \(error.localizedDescription, privacy: .public)")
             return false
         }
+    }
+
+    /// Whether `model` supports image input (gates the composer photo button).
+    func supportsVision(_ model: String) async -> Bool {
+        await supports("vision", model: model)
     }
 }

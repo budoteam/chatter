@@ -130,10 +130,36 @@ struct OllamaChatRequest: Codable {
     var messages: [OllamaChatMessage]
     var tools: [OllamaTool]?
     var stream: Bool
+    /// Reasoning mode: most models take a bool, gpt-oss-style models a level.
+    var think: OllamaThinkValue?
     var options: Options?
 
     struct Options: Codable {
         var temperature: Double?
+    }
+}
+
+/// The `think` request field: `true`/`false` for most thinking models, or an
+/// effort level string ("low"/"medium"/"high") for models that require one.
+enum OllamaThinkValue: Codable {
+    case enabled(Bool)
+    case level(String)
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .enabled(let flag): try container.encode(flag)
+        case .level(let level): try container.encode(level)
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let flag = try? container.decode(Bool.self) {
+            self = .enabled(flag)
+        } else {
+            self = .level(try container.decode(String.self))
+        }
     }
 }
 

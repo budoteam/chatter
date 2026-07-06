@@ -20,6 +20,8 @@ final class Agent {
     var knowledgeBundleIDs: [UUID] = []
     /// Whether the built-in web research tools (search & fetch) are offered.
     var webAccessEnabled: Bool = true
+    /// Raw `ThinkingMode` — how the model's reasoning mode is requested.
+    var thinkingModeRaw: String = ""
     var createdAt: Date = Date()
     var isDefault: Bool = false
 
@@ -53,4 +55,44 @@ final class Agent {
     }
 
     var color: Color { Color(hex: colorHex) }
+
+    var thinkingMode: ThinkingMode {
+        get { ThinkingMode(rawValue: thinkingModeRaw) ?? .standard }
+        set { thinkingModeRaw = newValue.rawValue }
+    }
+}
+
+/// How reasoning ("thinking") is requested from the model. `.standard` sends
+/// nothing and lets the model use its default; on/off are booleans; the levels
+/// are for models like gpt-oss that require an effort level instead.
+enum ThinkingMode: String, CaseIterable, Identifiable {
+    case standard = ""
+    case off
+    case on
+    case low
+    case medium
+    case high
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .standard: return "Default (model decides)"
+        case .off: return "Off"
+        case .on: return "On"
+        case .low: return "Low"
+        case .medium: return "Medium"
+        case .high: return "High"
+        }
+    }
+
+    /// The `think` value sent to Ollama (nil = let the model decide).
+    var ollamaValue: OllamaThinkValue? {
+        switch self {
+        case .standard: return nil
+        case .off: return .enabled(false)
+        case .on: return .enabled(true)
+        case .low, .medium, .high: return .level(rawValue)
+        }
+    }
 }
