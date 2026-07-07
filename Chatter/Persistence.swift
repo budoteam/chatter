@@ -15,6 +15,8 @@ enum Persistence {
         MCPServerConfig.self,
         KnowledgeBundle.self,
         KnowledgeConcept.self,
+        MemoryEntry.self,
+        Skill.self,
     ])
 
     static func makeContainer() -> ModelContainer {

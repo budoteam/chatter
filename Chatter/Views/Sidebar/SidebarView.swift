@@ -64,7 +64,7 @@ struct SidebarView: View {
         .padding(.bottom, 18)
     }
 
-    // MARK: - Bottom navigation (Agents / Knowledge)
+    // MARK: - Bottom navigation (Agents / Knowledge / Skills)
 
     private var navButtons: some View {
         VStack(spacing: 0) {
@@ -74,6 +74,7 @@ struct SidebarView: View {
             HStack(spacing: 8) {
                 navButton(title: "Agents", systemImage: "person.2.fill", screen: .agents)
                 navButton(title: "Knowledge", systemImage: "books.vertical.fill", screen: .knowledge)
+                navButton(title: "Skills", systemImage: "wand.and.stars", screen: .skills)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)

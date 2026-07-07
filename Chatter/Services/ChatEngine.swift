@@ -12,6 +12,8 @@ final class ChatEngine {
     private let mcp: MCPConnectionManager
     private let knowledge: KnowledgeToolProvider
     private let web: WebToolProvider
+    private let memory = MemoryToolProvider()
+    private let skills = SkillToolProvider()
     private let maxToolIterations = 42
 
     init(ollama: OllamaServiceProtocol, mcp: MCPConnectionManager, knowledge: KnowledgeToolProvider) {
@@ -93,11 +95,39 @@ final class ChatEngine {
         let webToolNames = Set(webTools.map(\.function.name))
         tools += webTools
 
+        // Built-in self-managed memory tools, offered when the agent has
+        // memory enabled.
+        let memoryEnabled = agent?.memoryEnabled ?? false
+        let memoryTools = memoryEnabled ? memory.tools() : []
+        let memoryToolNames = Set(memoryTools.map(\.function.name))
+        tools += memoryTools
+
+        // Built-in skill tools: read for enabled skills, plus authoring when
+        // the agent may write to the shared pool.
+        let skillIDs = agent?.skillIDs ?? []
+        let skillTools = skills.tools(
+            skillIDs: skillIDs,
+            authoringEnabled: agent?.skillAuthoringEnabled ?? false,
+            context: context
+        )
+        let skillToolNames = Set(skillTools.map(\.function.name))
+        tools += skillTools
+
         // The knowledge overview is stable within one send; compute it once
         // instead of per tool-loop iteration (it fetches and walks bundles).
+        // Same for the skill index and the memory listing — a mid-turn save
+        // is confirmed by its tool result and shows up fully on the next send.
         let knowledgeSection = knowledge.systemPromptSection(
             bundleIDs: knowledgeBundleIDs, context: context
         )
+        let skillsSection = skills.systemPromptSection(
+            skillIDs: skillIDs,
+            authoringEnabled: agent?.skillAuthoringEnabled ?? false,
+            context: context
+        )
+        let memorySection = memoryEnabled
+            ? memory.systemPromptSection(agentID: agent?.id, context: context)
+            : nil
 
         var iteration = 0
         while true {
@@ -114,7 +144,12 @@ final class ChatEngine {
             var msgs: [OllamaChatMessage] = [
                 OllamaChatMessage(
                     role: "system",
-                    content: Self.systemPrompt(for: agent, knowledgeSection: knowledgeSection)
+                    content: Self.systemPrompt(
+                        for: agent,
+                        knowledgeSection: knowledgeSection,
+                        skillsSection: skillsSection,
+                        memorySection: memorySection
+                    )
                 )
             ]
             msgs.append(contentsOf: session.orderedMessages.map(Self.toOllama))
@@ -216,6 +251,16 @@ final class ChatEngine {
                         )
                     } else if webToolNames.contains(name) {
                         result = try await web.call(name: name, argumentsJSON: argsJSON)
+                    } else if memoryToolNames.contains(name) {
+                        result = try memory.call(
+                            namespacedName: name, argumentsJSON: argsJSON,
+                            agentID: agent?.id, context: context
+                        )
+                    } else if skillToolNames.contains(name), let agent {
+                        result = try skills.call(
+                            namespacedName: name, argumentsJSON: argsJSON,
+                            agent: agent, context: context
+                        )
                     } else {
                         result = try await mcp.callTool(namespacedName: name, argumentsJSON: argsJSON)
                     }
@@ -245,14 +290,21 @@ final class ChatEngine {
         return formatter
     }()
 
-    /// The agent's system prompt plus its knowledge-base overview, always
-    /// ending with the current date & time.
-    private static func systemPrompt(for agent: Agent?, knowledgeSection: String?) -> String {
+    /// The agent's system prompt plus its knowledge overview, skill index and
+    /// memory listing, always ending with the current date & time.
+    private static func systemPrompt(
+        for agent: Agent?,
+        knowledgeSection: String?,
+        skillsSection: String?,
+        memorySection: String?
+    ) -> String {
         let timestamp = "Current Date and Time: \(timestampFormatter.string(from: Date()))"
         var parts: [String] = []
         let prompt = agent?.systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if !prompt.isEmpty { parts.append(prompt) }
         if let knowledgeSection { parts.append(knowledgeSection) }
+        if let skillsSection { parts.append(skillsSection) }
+        if let memorySection { parts.append(memorySection) }
         parts.append(timestamp)
         return parts.joined(separator: "\n\n")
     }

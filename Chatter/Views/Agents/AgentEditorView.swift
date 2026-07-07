@@ -12,6 +12,7 @@ struct AgentEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \MCPServerConfig.name) private var servers: [MCPServerConfig]
     @Query(sort: \KnowledgeBundle.name) private var knowledgeBundles: [KnowledgeBundle]
+    @Query(sort: \Skill.name) private var allSkills: [Skill]
 
     @State private var name = ""
     @State private var systemPrompt = ""
@@ -24,6 +25,10 @@ struct AgentEditorView: View {
     @State private var webAccess = true
     @State private var thinkingMode: ThinkingMode = .standard
     @State private var supportsThinking = false
+    @State private var selectedSkillIDs: Set<UUID> = []
+    @State private var skillAuthoring = false
+    @State private var memoryEnabled = false
+    @State private var showMemories = false
 
     private let icons = ["sparkles", "brain", "bolt.fill", "wand.and.stars", "cpu",
                          "message.fill", "book.fill", "chevron.left.forwardslash.chevron.right",
@@ -82,9 +87,17 @@ struct AgentEditorView: View {
                 supportsThinking = await env.supports("thinking", model: modelId)
             }
 
-            Section("System Prompt") {
-                TextField("Instructions for this agent…", text: $systemPrompt, axis: .vertical)
-                    .lineLimit(4...12)
+            Section {
+                // TextEditor, not TextField(axis: .vertical): the growing
+                // TextField misaligns in macOS forms (trailing-aligned, no
+                // scrolling) and jumps on newline inside iOS forms. Same
+                // pattern as ConceptEditorView's markdown body.
+                TextEditor(text: $systemPrompt)
+                    .frame(minHeight: 140)
+            } header: {
+                Text("System Prompt")
+            } footer: {
+                Text("Instructions for this agent.")
             }
 
             Section {
@@ -126,6 +139,36 @@ struct AgentEditorView: View {
                     }
                 }
             }
+
+            Section {
+                ForEach(allSkills) { skill in
+                    Toggle(isOn: membership(of: skill.id, in: $selectedSkillIDs)) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(skill.name)
+                            if !skill.summary.isEmpty {
+                                Text(skill.summary)
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+                Toggle("Can create & edit skills", isOn: $skillAuthoring)
+            } header: {
+                Text("Skills")
+            } footer: {
+                Text("Skills are reusable procedures shared across agents. Authoring lets this agent write new skills into the pool.")
+            }
+
+            Section {
+                Toggle("Persistent memory", isOn: $memoryEnabled)
+                if agent != nil, memoryEnabled {
+                    Button("Show memories…") { showMemories = true }
+                }
+            } header: {
+                Text("Memory")
+            } footer: {
+                Text("The agent saves and maintains its own notes about you across chats.")
+            }
         }
         .formStyle(.grouped)
         #if os(iOS)
@@ -153,6 +196,11 @@ struct AgentEditorView: View {
         }
         #endif
         .onAppear(perform: load)
+        .sheet(isPresented: $showMemories) {
+            if let agent {
+                AgentMemoriesSheet(agent: agent)
+            }
+        }
     }
 
     private var iconPicker: some View {
@@ -215,6 +263,9 @@ struct AgentEditorView: View {
         colorHex = agent.colorHex
         selectedServerIDs = Set(agent.mcpServerIDs)
         selectedBundleIDs = Set(agent.knowledgeBundleIDs)
+        selectedSkillIDs = Set(agent.skillIDs)
+        skillAuthoring = agent.skillAuthoringEnabled
+        memoryEnabled = agent.memoryEnabled
         webAccess = agent.webAccessEnabled
         thinkingMode = agent.thinkingMode
     }
@@ -229,6 +280,9 @@ struct AgentEditorView: View {
         target.colorHex = colorHex
         target.mcpServerIDs = Array(selectedServerIDs)
         target.knowledgeBundleIDs = Array(selectedBundleIDs)
+        target.skillIDs = Array(selectedSkillIDs)
+        target.skillAuthoringEnabled = skillAuthoring
+        target.memoryEnabled = memoryEnabled
         target.webAccessEnabled = webAccess
         target.thinkingMode = thinkingMode
         if agent == nil {

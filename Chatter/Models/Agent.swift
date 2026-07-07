@@ -18,6 +18,13 @@ final class Agent {
     var mcpServerIDs: [UUID] = []
     /// IDs of the `KnowledgeBundle`s this agent can consult.
     var knowledgeBundleIDs: [UUID] = []
+    /// IDs of the global `Skill`s this agent has enabled.
+    var skillIDs: [UUID] = []
+    /// Whether this agent keeps a persistent memory (prompt injection + the
+    /// memory__save/update/delete tools).
+    var memoryEnabled: Bool = false
+    /// Whether this agent may create/update skills in the shared pool.
+    var skillAuthoringEnabled: Bool = false
     /// Whether the built-in web research tools (search & fetch) are offered.
     var webAccessEnabled: Bool = true
     /// Raw `ThinkingMode` — how the model's reasoning mode is requested.
@@ -37,6 +44,9 @@ final class Agent {
         colorHex: String = "6C5CE7",
         mcpServerIDs: [UUID] = [],
         knowledgeBundleIDs: [UUID] = [],
+        skillIDs: [UUID] = [],
+        memoryEnabled: Bool = false,
+        skillAuthoringEnabled: Bool = false,
         webAccessEnabled: Bool = true,
         isDefault: Bool = false
     ) {
@@ -49,6 +59,9 @@ final class Agent {
         self.colorHex = colorHex
         self.mcpServerIDs = mcpServerIDs
         self.knowledgeBundleIDs = knowledgeBundleIDs
+        self.skillIDs = skillIDs
+        self.memoryEnabled = memoryEnabled
+        self.skillAuthoringEnabled = skillAuthoringEnabled
         self.webAccessEnabled = webAccessEnabled
         self.createdAt = Date()
         self.isDefault = isDefault

@@ -23,6 +23,8 @@ struct RootView: View {
                     AgentsScreen()
                 case .knowledge:
                     KnowledgeScreen()
+                case .skills:
+                    SkillsScreen()
                 case .chat:
                     if let session = env.selectedSession {
                         ChatView(session: session)

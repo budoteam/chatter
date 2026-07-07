@@ -141,6 +141,13 @@ struct AgentsScreen: View {
     }
 
     private func delete(_ agent: Agent) {
+        // Memories reference the agent by ID (no relationship), so they must
+        // be cleaned up explicitly.
+        let agentID = agent.id
+        let memories = (try? context.fetch(FetchDescriptor<MemoryEntry>())) ?? []
+        for entry in memories where entry.agentID == agentID {
+            context.delete(entry)
+        }
         context.delete(agent)
         try? context.save()
     }

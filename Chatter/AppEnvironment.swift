@@ -7,6 +7,7 @@ enum MainScreen {
     case chat
     case agents
     case knowledge
+    case skills
 }
 
 /// Root observable object: owns the shared services and cross-view UI state
