@@ -35,6 +35,12 @@ final class AppEnvironment {
     /// Bumped by the macOS "New Chat" menu command; observed by `RootView`.
     private(set) var newSessionRequestID = UUID()
 
+    /// Bumped on every explicit pick of a screen or chat; observed by
+    /// `RootView` to surface the detail column on iPhone. A plain
+    /// `onChange(of: mainScreen)` misses re-picking the still-active screen
+    /// after popping back to the sidebar (value unchanged → no change event).
+    private(set) var detailRequestID = UUID()
+
     init() {
         let ollama = OllamaService()
         let mcp = MCPConnectionManager()
@@ -47,11 +53,18 @@ final class AppEnvironment {
 
     func requestNewSession() { newSessionRequestID = UUID() }
 
+    /// Switches the detail column to a screen (sidebar nav buttons).
+    func showScreen(_ screen: MainScreen) {
+        mainScreen = screen
+        detailRequestID = UUID()
+    }
+
     /// Selects a session and switches the detail column back to the chat view
     /// (used when starting/opening a chat from the Agents overview).
     func openChat(_ session: ChatSession) {
         selectedSession = session
         mainScreen = .chat
+        detailRequestID = UUID()
     }
 
     func refreshAPIKeyState() { hasAPIKey = KeychainService.hasAPIKey }

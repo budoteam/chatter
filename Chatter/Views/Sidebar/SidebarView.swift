@@ -84,7 +84,7 @@ struct SidebarView: View {
 
     private func navButton(title: String, systemImage: String, screen: MainScreen) -> some View {
         let isActive = env.mainScreen == screen
-        return Button { env.mainScreen = screen } label: {
+        return Button { env.showScreen(screen) } label: {
             VStack(spacing: 4) {
                 Image(systemName: systemImage)
                     .font(.system(size: 15, weight: .semibold))

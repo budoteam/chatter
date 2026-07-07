@@ -45,13 +45,11 @@ struct RootView: View {
         .navigationSplitViewStyle(.balanced)
         // On iPhone (compact), surface the detail column when the user picks a
         // screen or opens a chat; on regular widths both columns stay visible.
-        .onChange(of: env.mainScreen) { preferredColumn = .detail }
-        // Only when a session becomes selected — deselection (nil) also fires
-        // this on back-pop, and forcing .detail then would show WelcomeView
-        // instead of letting the pop reach the sidebar.
-        .onChange(of: env.selectedSession?.id) { _, newID in
-            if newID != nil { preferredColumn = .detail }
-        }
+        // Driven by an explicit request ID, not by value changes: re-picking
+        // the still-active screen or chat after popping back to the sidebar
+        // must also surface the detail column. Back-pop deselection doesn't
+        // bump the ID, so the pop still reaches the sidebar untouched.
+        .onChange(of: env.detailRequestID) { preferredColumn = .detail }
         #if os(macOS)
         .frame(minWidth: 860, minHeight: 560)
         #endif

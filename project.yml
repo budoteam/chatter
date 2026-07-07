@@ -15,7 +15,7 @@ settings:
   base:
     MARKETING_VERSION: "1.4"
     # Build number scheme: <yyyymmdd>.<counter that day>
-    CURRENT_PROJECT_VERSION: "20260707.1"
+    CURRENT_PROJECT_VERSION: "20260707.2"
     SWIFT_VERSION: "5.0"
     CODE_SIGN_STYLE: Automatic
     DEVELOPMENT_TEAM: X9FHM3F6WK
