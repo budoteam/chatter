@@ -16,6 +16,7 @@ struct SettingsView: View {
         Form {
             apiKeySection
             mcpSection
+            syncSection
             aboutSection
         }
         .formStyle(.grouped)
@@ -147,12 +148,79 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: - iCloud sync
+
+    private var syncSection: some View {
+        Section {
+            storeModeRow
+            if env.sync.storeMode == .cloudKit {
+                syncEventRow(title: "Export", status: env.sync.exports)
+                syncEventRow(title: "Import", status: env.sync.imports)
+            }
+        } header: {
+            Text("iCloud Sync")
+        } footer: {
+            Text("Chats, agents, skills and memories sync via your private iCloud database. Export = this device uploading, import = receiving changes from other devices.")
+        }
+    }
+
+    @ViewBuilder
+    private var storeModeRow: some View {
+        switch env.sync.storeMode {
+        case .cloudKit:
+            Label("iCloud (CloudKit)", systemImage: "icloud")
+        case .localOnly:
+            Label("Local only — changes do NOT sync. Check the iCloud login on this device.", systemImage: "exclamationmark.icloud.fill")
+                .foregroundStyle(.orange)
+        case .inMemory:
+            Label("In-memory store — data is lost when the app quits.", systemImage: "exclamationmark.triangle.fill")
+                .foregroundStyle(.red)
+        }
+    }
+
+    @ViewBuilder
+    private func syncEventRow(title: String, status: CloudSyncMonitor.EventStatus) -> some View {
+        LabeledContent(title) {
+            if status.isRunning {
+                Label("Running…", systemImage: "arrow.triangle.2.circlepath")
+                    .foregroundStyle(.secondary)
+            } else if let end = status.endDate {
+                if status.succeeded {
+                    Label(end.formatted(.relative(presentation: .named)), systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                } else {
+                    Label(end.formatted(.relative(presentation: .named)), systemImage: "xmark.circle.fill")
+                        .foregroundStyle(.red)
+                }
+            } else {
+                Text("No activity yet this session")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .font(.callout)
+        if !status.succeeded, let error = status.errorDescription {
+            Label(error, systemImage: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+                .font(.caption)
+        }
+    }
+
+    // MARK: - About
+
     private var aboutSection: some View {
         Section {
-            LabeledContent("Version", value: "1.0")
+            LabeledContent("Version", value: Self.appVersion)
         } footer: {
             Text("Chatter — LLM chat with MCP tools, powered by Ollama Cloud.")
         }
+    }
+
+    /// "1.4 (20260707.2)" — read from the bundle so it always matches the build.
+    private static var appVersion: String {
+        let info = Bundle.main.infoDictionary
+        let short = info?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info?["CFBundleVersion"] as? String ?? "?"
+        return "\(short) (\(build))"
     }
 
     // MARK: - Actions

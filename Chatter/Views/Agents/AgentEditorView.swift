@@ -29,6 +29,7 @@ struct AgentEditorView: View {
     @State private var skillAuthoring = false
     @State private var memoryEnabled = false
     @State private var showMemories = false
+    @State private var isDefault = false
 
     private let icons = ["sparkles", "brain", "bolt.fill", "wand.and.stars", "cpu",
                          "message.fill", "book.fill", "chevron.left.forwardslash.chevron.right",
@@ -42,6 +43,12 @@ struct AgentEditorView: View {
                 TextField("Name", text: $name)
                 iconPicker
                 colorPicker
+            }
+
+            Section {
+                Toggle("Default agent", isOn: $isDefault)
+            } footer: {
+                Text("New chats start with the default agent. Turning this on removes the flag from every other agent.")
             }
 
             Section("Model") {
@@ -268,6 +275,7 @@ struct AgentEditorView: View {
         memoryEnabled = agent.memoryEnabled
         webAccess = agent.webAccessEnabled
         thinkingMode = agent.thinkingMode
+        isDefault = agent.isDefault
     }
 
     private func save() {
@@ -285,6 +293,16 @@ struct AgentEditorView: View {
         target.memoryEnabled = memoryEnabled
         target.webAccessEnabled = webAccess
         target.thinkingMode = thinkingMode
+        // The default flag is exclusive: setting it here clears it everywhere
+        // else (also cleans up legacy duplicates from the old first-launch
+        // seeding, which flagged one "Assistant" per device).
+        if isDefault {
+            let others = (try? context.fetch(FetchDescriptor<Agent>())) ?? []
+            for other in others where other.isDefault && other !== target {
+                other.isDefault = false
+            }
+        }
+        target.isDefault = isDefault
         if agent == nil {
             context.insert(target)
         }

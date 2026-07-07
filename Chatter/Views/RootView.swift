@@ -57,7 +57,6 @@ struct RootView: View {
             NavigationStack { SettingsView() }
         }
         .task {
-            seedDefaultAgentIfNeeded()
             await env.refreshModels()
             backfillAgentModels()
             await env.mcp.syncConnections(configs: allServers())
@@ -81,22 +80,13 @@ struct RootView: View {
         env.openChat(session)
     }
 
-    private func seedDefaultAgentIfNeeded() {
-        guard agents.isEmpty else { return }
-        let assistant = Agent(
-            name: "Assistant",
-            systemPrompt: "You are a helpful, concise assistant.",
-            modelId: env.models.first?.name ?? "",
-            iconSymbol: "sparkles",
-            colorHex: "6C5CE7",
-            isDefault: true
-        )
-        context.insert(assistant)
-        try? context.save()
-    }
+    // No agent seeding on first launch: a fresh install must wait for the
+    // CloudKit import instead of inserting its own "Assistant" — every device
+    // used to do that, and the duplicates (all flagged default) synced
+    // everywhere. Chats work without an agent until one is created/imported.
 
-    /// Agents are seeded before the model list loads, so give any agent
-    /// without a model the first available one once we know it.
+    /// Give any agent without a model (created while the list hadn't loaded)
+    /// the first available one once we know it.
     private func backfillAgentModels() {
         guard let first = env.models.first?.name else { return }
         let all = (try? context.fetch(FetchDescriptor<Agent>())) ?? []

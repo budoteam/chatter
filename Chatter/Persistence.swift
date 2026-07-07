@@ -8,6 +8,18 @@ import SwiftData
 /// isn't provisioned (e.g. building without a signing team), it transparently
 /// falls back to a local-only store so the app still runs.
 enum Persistence {
+    /// How `makeContainer()` ended up backing the store. Read by
+    /// `CloudSyncMonitor` / Settings so a silent fallback to a non-syncing
+    /// store is visible in the UI instead of only in the logs.
+    enum StoreMode {
+        case cloudKit
+        case localOnly
+        case inMemory
+    }
+
+    /// Set by `makeContainer()`; `.inMemory` until it ran.
+    private(set) static var storeMode: StoreMode = .inMemory
+
     static let schema = Schema([
         Agent.self,
         ChatSession.self,
@@ -26,9 +38,13 @@ enum Persistence {
             isStoredInMemoryOnly: false,
             cloudKitDatabase: .automatic
         )
-        if let container = try? ModelContainer(for: schema, configurations: cloudConfig) {
+        do {
+            let container = try ModelContainer(for: schema, configurations: cloudConfig)
+            storeMode = .cloudKit
             AppLogger.data.info("SwiftData container ready (CloudKit .automatic)")
             return container
+        } catch {
+            AppLogger.data.error("CloudKit container failed, falling back to local-only: \(error, privacy: .public)")
         }
 
         // Fallback: local-only store.
@@ -37,9 +53,13 @@ enum Persistence {
             isStoredInMemoryOnly: false,
             cloudKitDatabase: .none
         )
-        if let container = try? ModelContainer(for: schema, configurations: localConfig) {
+        do {
+            let container = try ModelContainer(for: schema, configurations: localConfig)
+            storeMode = .localOnly
             AppLogger.data.warning("SwiftData container ready (local only — CloudKit unavailable)")
             return container
+        } catch {
+            AppLogger.data.error("Local container failed, falling back to in-memory: \(error, privacy: .public)")
         }
 
         // Last resort: in-memory so the app never crashes on launch.

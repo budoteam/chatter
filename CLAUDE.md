@@ -25,7 +25,7 @@ xcodebuild -project Chatter.xcodeproj -scheme Chatter \
 xcodebuild -project Chatter.xcodeproj -scheme Chatter -destination 'platform=macOS' build
 ```
 
-Tests live in `ChatterTests` (OKF codec, knowledge transfer, PDF importer): `xcodebuild ... -destination 'platform=macOS' test`. Signing is automatic with the team from `project.yml`; entitlements are per-platform files (`Chatter/Chatter-iOS.entitlements`, `Chatter/Chatter-macOS.entitlements` — the APNs entitlement key differs between the platforms, and only macOS carries the sandbox key). TestFlight release: bump `CURRENT_PROJECT_VERSION` in `project.yml`, `./generate.sh`, archive with `xcodebuild ... archive -allowProvisioningUpdates`, upload via Xcode Organizer.
+Tests live in `ChatterTests` (OKF codec, knowledge transfer, PDF importer): `xcodebuild ... -destination 'platform=macOS' test`. Signing is automatic with the team from `project.yml`; entitlements are per-platform files (`Chatter/Chatter-iOS.entitlements`, `Chatter/Chatter-macOS.entitlements` — the APNs entitlement key differs between the platforms, and only macOS carries the sandbox key). TestFlight release: bump `CURRENT_PROJECT_VERSION` in `project.yml`, `./generate.sh`, archive with `xcodebuild ... archive -allowProvisioningUpdates`, upload via Xcode Organizer. **If the release adds or changes any `@Model`, deploy the CloudKit schema to Production first** (see below).
 
 ## Architecture
 
@@ -44,6 +44,8 @@ All models (`Agent`, `ChatSession`, `Message`, `MCPServerConfig`) sync via Cloud
 - Every property needs a default value; relationships must be optional; no `@Attribute(.unique)`.
 - Nested/structured data is stored as JSON strings or raw values with computed-property accessors (e.g. `Message.toolCallsJSON` ↔ `toolCalls`, `roleRaw` ↔ `role`). Enums are stored as their raw value.
 - Message ordering uses an explicit `orderIndex` (via `session.nextOrderIndex`), not timestamps.
+
+**CloudKit schema deployment (before every TestFlight release that touches a `@Model`):** CloudKit has separate Development and Production environments. Debug builds talk to Development, where SwiftData creates record types/fields automatically; TestFlight/App Store builds talk to Production, which is only updated by a manual deploy. Shipping a build whose models aren't in the Production schema makes every `RecordSave` fail with `BAD_REQUEST`, which stalls the device's entire export pipeline — nothing syncs anymore, and un-exported data is lost if the app is deleted (this happened with 1.4: `Skill`/`MemoryEntry` were missing in Production). Procedure: run a debug build once so Development picks up the new schema, then in the [CloudKit Console](https://icloud.developer.apple.com) → container `iCloud.team.budo.chatter` → Schema → *Deploy Schema Changes* to Production, **then** upload the build. Sync health is visible in Settings → iCloud Sync (`CloudSyncMonitor`), and container-fallback / export errors are logged via `AppLogger.data`.
 
 ### UI
 

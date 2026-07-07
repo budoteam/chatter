@@ -19,6 +19,8 @@ final class AppEnvironment {
     let mcp: MCPConnectionManager
     let knowledge: KnowledgeToolProvider
     let engine: ChatEngine
+    /// Watches CloudKit sync events for the Settings status section.
+    let sync = CloudSyncMonitor()
 
     var selectedSession: ChatSession?
     /// Which screen the detail column shows (chat / agents / knowledge).
