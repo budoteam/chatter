@@ -72,7 +72,7 @@ actor LegacySSEClientTransport: Transport {
                 self.endpointContinuation = cont
                 Task {
                     try? await Task.sleep(for: .seconds(10))
-                    await self.failEndpointWait()
+                    self.failEndpointWait()
                 }
             }
         } catch {

@@ -29,9 +29,11 @@ final class CloudSyncMonitor {
     /// How the store was created (CloudKit, local fallback, in-memory).
     var storeMode: Persistence.StoreMode { Persistence.storeMode }
 
+    /// `@ObservationIgnored` keeps the `@Observable` macro from wrapping this
+    /// in tracked accessors (on which isolation attributes have no effect).
     /// `nonisolated(unsafe)`: written once in `init`, read in nonisolated
     /// `deinit` — no concurrent access.
-    nonisolated(unsafe) private var observer: (any NSObjectProtocol)?
+    @ObservationIgnored nonisolated(unsafe) private var observer: (any NSObjectProtocol)?
 
     init() {
         observer = NotificationCenter.default.addObserver(

@@ -9,7 +9,9 @@ struct OKFBundleDocument: FileDocument {
     static var readableContentTypes: [UTType] { [.folder] }
     static var writableContentTypes: [UTType] { [.folder] }
 
-    let root: FileWrapper
+    /// `nonisolated(unsafe)`: `FileWrapper` is not Sendable, but the document
+    /// is built once and only read by the `fileExporter` machinery.
+    nonisolated(unsafe) let root: FileWrapper
 
     init(root: FileWrapper) {
         self.root = root
