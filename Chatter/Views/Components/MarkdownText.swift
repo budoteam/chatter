@@ -9,7 +9,7 @@ struct MarkdownText: View {
     let text: String
 
     var body: some View {
-        let blocks = MarkdownParser.parse(text)
+        let blocks = Self.parsedBlocks(text)
         VStack(alignment: .leading, spacing: 10) {
             ForEach(blocks.indices, id: \.self) { index in
                 blockView(blocks[index])
@@ -115,14 +115,60 @@ struct MarkdownText: View {
             .background(isHeader ? AnyShapeStyle(Theme.surfaceRaised) : AnyShapeStyle(.clear))
     }
 
+    // MARK: - Caching
+
+    @MainActor
+    private static func parsedBlocks(_ text: String) -> [MarkdownBlock] {
+        let key = text as NSString
+        if let hit = MarkdownCache.blocks.object(forKey: key) { return hit.value }
+        let blocks = MarkdownParser.parse(text)
+        MarkdownCache.blocks.setObject(.init(blocks), forKey: key, cost: text.utf16.count)
+        return blocks
+    }
+
     // MARK: - Inline
 
+    @MainActor
     static func inline(_ string: String) -> AttributedString {
-        (try? AttributedString(
+        let key = string as NSString
+        if let hit = MarkdownCache.inline.object(forKey: key) { return hit.value }
+        let attributed = (try? AttributedString(
             markdown: string,
             options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         )) ?? AttributedString(string)
+        MarkdownCache.inline.setObject(.init(attributed), forKey: key)
+        return attributed
     }
+}
+
+/// Memoizes the two expensive steps of rendering. A streaming message
+/// re-renders at ~12 Hz and would otherwise re-parse its entire accumulated
+/// text and rebuild `AttributedString(markdown:)` for every block on the main
+/// thread — O(n²) over the answer length. Completed blocks never change, so
+/// the per-string inline cache reduces each flush to lookups plus one
+/// conversion for the still-growing block.
+@MainActor
+private enum MarkdownCache {
+    final class Box<T> {
+        let value: T
+        init(_ value: T) { self.value = value }
+    }
+
+    /// Full text → parsed blocks. Streaming inserts a near-duplicate entry
+    /// per flush, hence the cost bound (UTF-16 length, ~4 MB total).
+    static let blocks: NSCache<NSString, Box<[MarkdownBlock]>> = {
+        let cache = NSCache<NSString, Box<[MarkdownBlock]>>()
+        cache.countLimit = 64
+        cache.totalCostLimit = 4 << 20
+        return cache
+    }()
+
+    /// Block source string → inline-styled string (the dominant cost).
+    static let inline: NSCache<NSString, Box<AttributedString>> = {
+        let cache = NSCache<NSString, Box<AttributedString>>()
+        cache.countLimit = 2048
+        return cache
+    }()
 }
 
 // MARK: - Parser
