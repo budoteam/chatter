@@ -8,8 +8,18 @@
 
 set -e
 
-echo "Installing XcodeGen..."
-brew install xcodegen
+# Pinned GitHub release instead of `brew install xcodegen`: brew wastes ~30s
+# on auto-update and fails flakily on Xcode Cloud runners while pouring the
+# bottle ("/usr/local/Cellar/xcodegen/... is not a directory"). The zip layout
+# (bin/ next to share/) must stay intact — the binary resolves its
+# SettingPresets relative to its own path.
+XCODEGEN_VERSION="2.46.0"
+echo "Installing XcodeGen ${XCODEGEN_VERSION}..."
+curl -fsSL --retry 3 -o /tmp/xcodegen.zip \
+  "https://github.com/yonaskolb/XcodeGen/releases/download/${XCODEGEN_VERSION}/xcodegen.zip"
+unzip -q -o /tmp/xcodegen.zip -d /tmp/xcodegen-dist
+export PATH="/tmp/xcodegen-dist/xcodegen/bin:$PATH"
+xcodegen --version
 
 cd "$CI_PRIMARY_REPOSITORY_PATH"
 
