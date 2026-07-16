@@ -249,9 +249,11 @@ struct ComposerView: View {
         Task { @MainActor in focused = true }
     }
 
+    private var isSending: Bool { env.isSending(session) }
+
     private var sendButton: some View {
         Button(action: performSend) {
-            Image(systemName: viewModel.isSending ? "stop.fill" : "arrow.up")
+            Image(systemName: isSending ? "stop.fill" : "arrow.up")
                 .font(.system(size: 14, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(width: 34, height: 34)
@@ -259,15 +261,15 @@ struct ComposerView: View {
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .disabled(!viewModel.canSend && !viewModel.isSending)
+        .disabled(!viewModel.hasDraft && !isSending)
         .keyboardShortcut(.return, modifiers: .command)
-        .animation(.easeInOut(duration: 0.15), value: viewModel.isSending)
+        .animation(.easeInOut(duration: 0.15), value: isSending)
     }
 
     private var sendFill: AnyShapeStyle {
-        if viewModel.isSending {
+        if isSending {
             AnyShapeStyle(Color.secondary.opacity(0.85))
-        } else if viewModel.canSend {
+        } else if viewModel.hasDraft {
             AnyShapeStyle(Theme.brandGradient)
         } else {
             AnyShapeStyle(Color.secondary.opacity(0.35))

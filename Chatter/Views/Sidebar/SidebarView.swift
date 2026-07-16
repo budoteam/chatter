@@ -106,8 +106,33 @@ struct SidebarView: View {
 
     // MARK: - Sessions
 
+    /// Plain box, deliberately not observed: mutating it inside `body` is
+    /// legal and doesn't re-trigger rendering — memoizes the date bucketing
+    /// so selection-change re-renders don't redo Calendar math per session.
+    private final class GroupCache {
+        var key = 0
+        var groups: [SessionGroup] = []
+    }
+    @State private var groupCache = GroupCache()
+
+    private var groupedSessions: [SessionGroup] {
+        var hasher = Hasher()
+        // Buckets shift at midnight even if no session changed.
+        hasher.combine(Calendar.current.startOfDay(for: .now))
+        for session in sessions {
+            hasher.combine(session.id)
+            hasher.combine(session.updatedAt)
+        }
+        let key = hasher.finalize()
+        if key != groupCache.key || groupCache.groups.isEmpty {
+            groupCache.groups = SessionGroup.grouped(sessions)
+            groupCache.key = key
+        }
+        return groupCache.groups
+    }
+
     private var sessionsSection: some View {
-        ForEach(SessionGroup.grouped(sessions), id: \.title) { group in
+        ForEach(groupedSessions, id: \.title) { group in
             Section {
                 ForEach(group.sessions) { session in
                     sessionRow(session)
@@ -195,8 +220,13 @@ struct SidebarView: View {
 
     private func delete(_ session: ChatSession) {
         if env.selectedSession == session { env.selectedSession = nil }
-        context.delete(session)
-        try? context.save()
+        Task { @MainActor in
+            // A turn may still be streaming into this session — wait for its
+            // teardown saves before deleting the models it writes to.
+            await env.cancelTurnAndWait(for: session)
+            context.delete(session)
+            try? context.save()
+        }
     }
 }
 

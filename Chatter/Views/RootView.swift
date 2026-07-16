@@ -57,6 +57,7 @@ struct RootView: View {
             NavigationStack { SettingsView() }
         }
         .task {
+            resetStaleStreamingFlags()
             await env.refreshModels()
             backfillAgentModels()
             await env.mcp.syncConnections(configs: allServers())
@@ -100,5 +101,20 @@ struct RootView: View {
 
     private func allServers() -> [MCPServerConfig] {
         (try? context.fetch(FetchDescriptor<MCPServerConfig>())) ?? []
+    }
+
+    /// `isStreaming` is persisted (and CloudKit-synced), but only the live
+    /// turn's teardown clears it — a force-quit or crash mid-stream leaves
+    /// messages flagged forever (stuck typing indicator / "Thinking…").
+    /// Nothing can be streaming this early in the launch, so clear leftovers.
+    private func resetStaleStreamingFlags() {
+        let descriptor = FetchDescriptor<Message>(
+            predicate: #Predicate { $0.isStreaming == true }
+        )
+        let stale = (try? context.fetch(descriptor)) ?? []
+        guard !stale.isEmpty else { return }
+        for message in stale { message.isStreaming = false }
+        try? context.save()
+        AppLogger.data.info("Reset \(stale.count) stale isStreaming flag(s) at launch")
     }
 }

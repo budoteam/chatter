@@ -8,13 +8,12 @@ import SwiftUI
 final class ChatViewModel {
     var inputText = ""
     var pendingImages: [ImageAttachment] = []
-    var isSending = false
     var errorMessage: String?
 
-    private var task: Task<Void, Never>?
-
-    var canSend: Bool {
-        guard !isSending else { return false }
+    /// Whether the composer holds sendable content. Whether a send may start
+    /// also depends on the session's turn state, which `AppEnvironment` owns
+    /// (it must survive this view model being recreated on session switches).
+    var hasDraft: Bool {
         let hasText = !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         return hasText || !pendingImages.isEmpty
     }
@@ -22,33 +21,40 @@ final class ChatViewModel {
     func send(env: AppEnvironment, session: ChatSession, agent: Agent?, context: ModelContext) {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         let images = pendingImages
-        guard (!text.isEmpty || !images.isEmpty), !isSending else { return }
+        guard (!text.isEmpty || !images.isEmpty), !env.isSending(session) else { return }
         inputText = ""
         pendingImages = []
-        isSending = true
 
-        task = Task {
+        env.runTurn(for: session) { [weak self] in
             do {
                 try await env.engine.send(text: text, images: images, session: session, agent: agent, context: context)
             } catch is CancellationError {
                 // User stopped — nothing to surface.
+            } catch let error as ChatEngine.EngineError {
+                // Thrown before anything was persisted (e.g. no model
+                // selected) — without this the cleared draft would be gone
+                // entirely. Restore it unless the user typed on meanwhile.
+                self?.errorMessage = error.localizedDescription
+                if let self, self.inputText.isEmpty, self.pendingImages.isEmpty {
+                    self.inputText = text
+                    self.pendingImages = images
+                }
             } catch {
-                errorMessage = error.localizedDescription
+                self?.errorMessage = error.localizedDescription
             }
-            finishStreaming(session: session, context: context)
-            isSending = false
+            Self.finishStreaming(session: session, context: context)
         }
     }
 
-    func stop() {
-        task?.cancel()
+    func stop(env: AppEnvironment, session: ChatSession) {
+        env.stopTurn(for: session)
     }
 
     /// "Redo from here": drops everything after the anchoring user message
     /// (for answers: the user message that led to them) and regenerates the
     /// assistant turn from the remaining history.
     func resend(from message: Message, env: AppEnvironment, session: ChatSession, context: ModelContext) {
-        guard !isSending else { return }
+        guard !env.isSending(session) else { return }
         let ordered = session.orderedMessages
         let anchor: Message? = message.role == .user
             ? message
@@ -60,17 +66,15 @@ final class ChatViewModel {
         }
         try? context.save()
 
-        isSending = true
-        task = Task {
+        env.runTurn(for: session) { [weak self] in
             do {
                 try await env.engine.regenerate(session: session, agent: session.agent, context: context)
             } catch is CancellationError {
                 // User stopped — nothing to surface.
             } catch {
-                errorMessage = error.localizedDescription
+                self?.errorMessage = error.localizedDescription
             }
-            finishStreaming(session: session, context: context)
-            isSending = false
+            Self.finishStreaming(session: session, context: context)
         }
     }
 
@@ -81,7 +85,7 @@ final class ChatViewModel {
     }
 
     /// Ensure no message is left flagged as streaming after stop/error.
-    private func finishStreaming(session: ChatSession, context: ModelContext) {
+    private static func finishStreaming(session: ChatSession, context: ModelContext) {
         for message in session.orderedMessages where message.isStreaming {
             message.isStreaming = false
         }

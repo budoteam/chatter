@@ -43,6 +43,13 @@ final class AppEnvironment {
     /// after popping back to the sidebar (value unchanged → no change event).
     private(set) var detailRequestID = UUID()
 
+    /// Live assistant turns keyed by session id. Owned here (not by the chat
+    /// view) because `ChatView` — and with it any view-local state — is
+    /// recreated whenever the selection changes (`.id(session.id)`); the turn
+    /// keeps running across that, and coming back must still show Stop and
+    /// refuse a concurrent second send into the same session.
+    private var activeTurns: [UUID: Task<Void, Never>] = [:]
+
     init() {
         let ollama = OllamaService()
         let mcp = MCPConnectionManager()
@@ -67,6 +74,35 @@ final class AppEnvironment {
         selectedSession = session
         mainScreen = .chat
         detailRequestID = UUID()
+    }
+
+    // MARK: - Turn lifecycle
+
+    func isSending(_ session: ChatSession) -> Bool {
+        activeTurns[session.id] != nil
+    }
+
+    /// Runs one assistant turn for the session; no-op while one is running.
+    func runTurn(for session: ChatSession, _ body: @escaping @MainActor () async -> Void) {
+        let id = session.id
+        guard activeTurns[id] == nil else { return }
+        activeTurns[id] = Task { @MainActor in
+            await body()
+            activeTurns[id] = nil
+        }
+    }
+
+    func stopTurn(for session: ChatSession) {
+        activeTurns[session.id]?.cancel()
+    }
+
+    /// Cancels a running turn and waits for its teardown (final flush and
+    /// saves) to finish — required before deleting the session, so the engine
+    /// never mutates models that are already gone.
+    func cancelTurnAndWait(for session: ChatSession) async {
+        guard let task = activeTurns[session.id] else { return }
+        task.cancel()
+        await task.value
     }
 
     func refreshAPIKeyState() { hasAPIKey = KeychainService.hasAPIKey }

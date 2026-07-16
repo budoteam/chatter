@@ -89,8 +89,8 @@ struct ChatView: View {
                 // collapse animations the layout loop can stop converging
                 // entirely (100s+ main-thread hang, see reports 2026-07-16).
                 .onChange(of: lastMessageFingerprint) { scrollToBottom(proxy, animated: false) }
-                .onChange(of: session.orderedMessages.count) { scrollToBottom(proxy) }
-                .onChange(of: viewModel.isSending) { scrollToBottom(proxy) }
+                .onChange(of: (session.messages ?? []).count) { scrollToBottom(proxy) }
+                .onChange(of: env.isSending(session)) { scrollToBottom(proxy) }
                 .onAppear { scrollToBottom(proxy, animated: false) }
             }
         }
@@ -100,7 +100,10 @@ struct ChatView: View {
     /// Includes isStreaming so the scroll also fires when streaming ends and
     /// the thoughts disclosure auto-collapses without a content change.
     private var lastMessageFingerprint: String {
-        guard let last = session.orderedMessages.last else { return "" }
+        // Evaluated per streamed flush (~12 Hz) — find the newest message
+        // with a linear max instead of sorting the whole session.
+        guard let last = (session.messages ?? []).max(by: { $0.orderIndex < $1.orderIndex })
+        else { return "" }
         return "\(last.isStreaming)|\(last.content.count)|\(last.thinking?.count ?? 0)"
     }
 
@@ -155,7 +158,7 @@ struct ChatView: View {
                 }
             }
         }
-        flushSteps(live: viewModel.isSending)
+        flushSteps(live: env.isSending(session))
         return items
     }
 
@@ -220,8 +223,8 @@ struct ChatView: View {
     }
 
     private func send() {
-        if viewModel.isSending {
-            viewModel.stop()
+        if env.isSending(session) {
+            viewModel.stop(env: env, session: session)
         } else {
             viewModel.send(env: env, session: session, agent: session.agent, context: context)
         }
