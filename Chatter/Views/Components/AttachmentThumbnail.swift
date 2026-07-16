@@ -29,9 +29,23 @@ struct AttachmentThumbnail: View {
     var size: CGFloat = 56
     var onRemove: (() -> Void)? = nil
 
+    /// Plain box, deliberately not observed: mutating it inside `body` is
+    /// legal and doesn't re-trigger rendering — memoizes the decoded image so
+    /// re-renders of the parent (every composer keystroke) don't re-decode
+    /// the full JPEG. The key compare is pointer-fast for the common case of
+    /// the same stored attachment string.
+    private final class DecodedImage {
+        var key = ""
+        var image: Image?
+    }
+    @State private var cache = DecodedImage()
+
     private var image: Image? {
-        guard let data = Data(base64Encoded: base64) else { return nil }
-        return Image(imageData: data)
+        if cache.key != base64 {
+            cache.image = Data(base64Encoded: base64).flatMap { Image(imageData: $0) }
+            cache.key = base64
+        }
+        return cache.image
     }
 
     var body: some View {

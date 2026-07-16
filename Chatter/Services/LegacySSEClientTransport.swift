@@ -34,6 +34,7 @@ actor LegacySSEClientTransport: Transport {
     private var postURL: URL?
     private var readTask: Task<Void, Never>?
     private var endpointContinuation: CheckedContinuation<URL, Swift.Error>?
+    private var endpointWatchdog: Task<Void, Never>?
 
     private let stream: AsyncThrowingStream<Data, Swift.Error>
     private let continuation: AsyncThrowingStream<Data, Swift.Error>.Continuation
@@ -70,13 +71,19 @@ actor LegacySSEClientTransport: Transport {
         do {
             postURL = try await withCheckedThrowingContinuation { cont in
                 self.endpointContinuation = cont
-                Task {
-                    try? await Task.sleep(for: .seconds(10))
+                self.endpointWatchdog = Task {
+                    // Sleep throws when the watchdog is cancelled after a
+                    // fast connect — don't sleep out the full 10 s then.
+                    guard (try? await Task.sleep(for: .seconds(10))) != nil else { return }
                     self.failEndpointWait()
                 }
             }
+            endpointWatchdog?.cancel()
+            endpointWatchdog = nil
         } catch {
             // Don't leave the stream running after a failed handshake.
+            endpointWatchdog?.cancel()
+            endpointWatchdog = nil
             readTask?.cancel()
             readTask = nil
             throw error
@@ -86,6 +93,8 @@ actor LegacySSEClientTransport: Transport {
     func disconnect() async {
         // Cancelling the reading task cancels the underlying URLSession task;
         // the shared session itself is intentionally left alone (see above).
+        endpointWatchdog?.cancel()
+        endpointWatchdog = nil
         readTask?.cancel()
         readTask = nil
         endpointContinuation?.resume(throwing: MCPError.internalError("Disconnected"))

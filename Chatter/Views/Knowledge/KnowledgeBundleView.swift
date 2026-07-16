@@ -264,8 +264,30 @@ struct KnowledgeBundleView: View {
         var concept: KnowledgeConcept?
     }
 
+    /// Plain box, deliberately not observed: mutating it inside `body` is
+    /// legal and doesn't re-trigger rendering — memoizes the folder tree
+    /// across renders.
+    private final class TreeCache {
+        var fingerprint = ""
+        var nodes: [TreeNode] = []
+    }
+    @State private var treeCache = TreeCache()
+
     private var tree: [TreeNode] {
-        nodes(for: bundle.orderedConcepts.map { ($0.path.split(separator: "/").map(String.init), $0) }, prefix: "")
+        // Rebuild only when the concept paths change. Name/notes keystrokes
+        // re-render the whole Form (bindings into the observed bundle), and
+        // `tree` is read twice per body — without memoization every keystroke
+        // paid for two recursive tree builds.
+        let concepts = bundle.orderedConcepts
+        let fingerprint = concepts.map(\.path).joined(separator: "\n")
+        if fingerprint != treeCache.fingerprint {
+            treeCache.nodes = nodes(
+                for: concepts.map { ($0.path.split(separator: "/").map(String.init), $0) },
+                prefix: ""
+            )
+            treeCache.fingerprint = fingerprint
+        }
+        return treeCache.nodes
     }
 
     private func nodes(
