@@ -7,6 +7,9 @@ struct ChatView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.modelContext) private var context
     @State private var viewModel = ChatViewModel()
+    /// Pending deferred scroll — cancelled and replaced on every trigger so
+    /// scrolls coalesce instead of stacking overlapping animated transactions.
+    @State private var scrollTask: Task<Void, Never>?
     #if os(iOS)
     /// Message shown in the select-text sheet — SwiftUI Text can't do range
     /// selection on iOS, so this opens the raw text in a UITextView.
@@ -79,7 +82,13 @@ struct ChatView: View {
                     .frame(maxWidth: .infinity)
                 }
                 .scrollDismissesKeyboard(.interactively)
-                .onChange(of: lastMessageFingerprint) { scrollToBottom(proxy) }
+                // Per-flush re-pin must be unanimated: an animated scrollTo at
+                // ~12 Hz keeps an animation transaction open in which every
+                // LazyVStack row (de)realization plays an insertion transition
+                // — rows visibly "fly in" over and over, and together with the
+                // collapse animations the layout loop can stop converging
+                // entirely (100s+ main-thread hang, see reports 2026-07-16).
+                .onChange(of: lastMessageFingerprint) { scrollToBottom(proxy, animated: false) }
                 .onChange(of: session.orderedMessages.count) { scrollToBottom(proxy) }
                 .onChange(of: viewModel.isSending) { scrollToBottom(proxy) }
                 .onAppear { scrollToBottom(proxy, animated: false) }
@@ -194,11 +203,18 @@ struct ChatView: View {
         // One-tick hop: onChange fires inside the same update that removes the
         // expanded thinking view; scrolling immediately would resolve bottomID
         // against stale (pre-collapse) geometry.
-        Task { @MainActor in
+        scrollTask?.cancel()
+        scrollTask = Task { @MainActor in
+            guard !Task.isCancelled else { return }
             if animated {
                 withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(bottomID, anchor: .bottom) }
             } else {
-                proxy.scrollTo(bottomID, anchor: .bottom)
+                // disablesAnimations, not just "no withAnimation": the scroll
+                // must not inherit a transaction that is already in flight
+                // (e.g. a disclosure collapse), or the re-pin animates anyway.
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) { proxy.scrollTo(bottomID, anchor: .bottom) }
             }
         }
     }
