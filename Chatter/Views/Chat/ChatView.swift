@@ -7,6 +7,11 @@ struct ChatView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.modelContext) private var context
     @State private var viewModel = ChatViewModel()
+    #if os(iOS)
+    /// Message shown in the select-text sheet — SwiftUI Text can't do range
+    /// selection on iOS, so this opens the raw text in a UITextView.
+    @State private var selectingMessage: Message?
+    #endif
 
     var body: some View {
         VStack(spacing: 0) {
@@ -40,6 +45,11 @@ struct ChatView: View {
         } message: {
             Text(viewModel.errorMessage ?? "")
         }
+        #if os(iOS)
+        .sheet(item: $selectingMessage) { message in
+            SelectableTextSheet(text: message.content)
+        }
+        #endif
     }
 
     @ViewBuilder
@@ -158,11 +168,18 @@ struct ChatView: View {
         }
     }
 
-    /// Resend (redo from here) / copy / delete under a message.
+    /// Resend (redo from here) / copy / select-text (iOS) / delete under a
+    /// message.
     private func actionBar(for message: Message) -> some View {
-        MessageActionBar(
+        #if os(iOS)
+        let onSelectText: (() -> Void)? = { selectingMessage = message }
+        #else
+        let onSelectText: (() -> Void)? = nil
+        #endif
+        return MessageActionBar(
             onResend: { viewModel.resend(from: message, env: env, session: session, context: context) },
             onCopy: { Pasteboard.copy(message.content) },
+            onSelectText: onSelectText,
             onDelete: { viewModel.delete(message, context: context) }
         )
     }

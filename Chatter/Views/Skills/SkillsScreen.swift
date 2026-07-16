@@ -1,15 +1,25 @@
 import SwiftUI
 import SwiftData
+import UniformTypeIdentifiers
 
 /// Detail-column list of the shared skill pool. Skills are mostly authored by
 /// agents themselves (skills__create); this screen is for reviewing, editing,
-/// and deleting them. Opened from the sidebar's bottom "Skills" button.
+/// deleting, and moving them across devices (markdown export/import). Opened
+/// from the sidebar's bottom "Skills" button.
 struct SkillsScreen: View {
     @Environment(\.modelContext) private var context
     @Query(sort: \Skill.name) private var skills: [Skill]
 
     @State private var editingSkill: Skill?
     @State private var showingNewSkill = false
+
+    @State private var exportingSkillDoc: SkillFileDocument?
+    @State private var exportingSkillName = ""
+    @State private var showSkillExporter = false
+    @State private var exportAllDoc: OKFBundleDocument?
+    @State private var showFolderExporter = false
+    @State private var showImporter = false
+    @State private var importReport: String?
 
     var body: some View {
         Group {
@@ -27,11 +37,24 @@ struct SkillsScreen: View {
                         }
                         .buttonStyle(.plain)
                         .contextMenu {
+                            Button("Export…") { export(skill) }
                             Button("Delete", role: .destructive) { delete(skill) }
                         }
                     }
                     .onDelete(perform: delete)
                 }
+            }
+        }
+        // Attached here, NOT next to the folder exporter below: two
+        // exporters/importers on the same node can silently break on iOS.
+        .fileExporter(
+            isPresented: $showSkillExporter,
+            document: exportingSkillDoc,
+            contentType: SkillTransfer.markdownType,
+            defaultFilename: exportingSkillName
+        ) { result in
+            if case .failure(let error) = result {
+                importReport = "Export failed: \(error.localizedDescription)"
             }
         }
         .navigationTitle("Skills")
@@ -41,6 +64,52 @@ struct SkillsScreen: View {
                     Label("New Skill", systemImage: "plus")
                 }
             }
+            ToolbarItem {
+                Menu {
+                    Button {
+                        showImporter = true
+                    } label: {
+                        Label("Import Skills…", systemImage: "square.and.arrow.down")
+                    }
+                    Button {
+                        exportAllDoc = OKFBundleDocument(root: SkillTransfer.exportWrapper(for: skills))
+                        showFolderExporter = true
+                    } label: {
+                        Label("Export All Skills…", systemImage: "square.and.arrow.up")
+                    }
+                    .disabled(skills.isEmpty)
+                } label: {
+                    Label("Import/Export", systemImage: "ellipsis.circle")
+                }
+            }
+        }
+        .fileExporter(
+            isPresented: $showFolderExporter,
+            document: exportAllDoc,
+            contentType: .folder,
+            defaultFilename: "Skills"
+        ) { result in
+            if case .failure(let error) = result {
+                importReport = "Export failed: \(error.localizedDescription)"
+            }
+        }
+        .fileImporter(
+            isPresented: $showImporter,
+            allowedContentTypes: [.folder, SkillTransfer.markdownType, .plainText],
+            allowsMultipleSelection: true
+        ) { result in
+            handleImport(result)
+        }
+        .alert(
+            "Skill Import",
+            isPresented: Binding(
+                get: { importReport != nil },
+                set: { if !$0 { importReport = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(importReport ?? "")
         }
         .sheet(item: $editingSkill) { skill in
             skillEditor(skill)
@@ -75,6 +144,23 @@ struct SkillsScreen: View {
         #else
         NavigationStack { SkillEditorView(skill: skill) }
         #endif
+    }
+
+    // MARK: - Import / Export
+
+    private func export(_ skill: Skill) {
+        exportingSkillDoc = SkillFileDocument(text: SkillTransfer.serializedContents(for: skill))
+        exportingSkillName = skill.name
+        showSkillExporter = true
+    }
+
+    private func handleImport(_ result: Result<[URL], Error>) {
+        switch result {
+        case .success(let urls):
+            importReport = SkillTransfer.importSkills(from: urls, into: context).alertText
+        case .failure(let error):
+            importReport = "Import failed: \(error.localizedDescription)"
+        }
     }
 
     // MARK: - Delete

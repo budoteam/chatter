@@ -34,7 +34,7 @@ struct MarkdownText: View {
                 .padding(.top, 2)
 
         case .code(let language, let content):
-            codeBlock(language: language, content: content)
+            CodeBlockView(language: language, content: content)
 
         case .table(let header, let rows):
             tableView(header: header, rows: rows)
@@ -75,26 +75,6 @@ struct MarkdownText: View {
         case 2: return .title3.weight(.semibold)
         default: return .headline
         }
-    }
-
-    private func codeBlock(language: String?, content: String) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if let language, !language.isEmpty {
-                Text(language)
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 12)
-                    .padding(.top, 8)
-            }
-            ScrollView(.horizontal, showsIndicators: false) {
-                Text(content)
-                    .font(.system(.callout, design: .monospaced))
-                    .textSelection(.enabled)
-                    .padding(12)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private func tableView(header: [String], rows: [[String]]) -> some View {

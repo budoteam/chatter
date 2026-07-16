@@ -20,11 +20,14 @@ enum Pasteboard {
 
 // MARK: - Message actions (resend / copy / delete)
 
-/// Subtle icon row shown under a message. `onResend` is optional — pass nil
-/// to omit the resend/regenerate action.
+/// Subtle icon row shown under a message. `onResend` and `onSelectText` are
+/// optional — pass nil to omit the action. Select-text is iOS-only in
+/// practice: SwiftUI Text can't do range selection there, so ChatView opens
+/// the message in a `SelectableTextSheet`; on macOS inline selection works.
 struct MessageActionBar: View {
     var onResend: (() -> Void)?
     let onCopy: () -> Void
+    var onSelectText: (() -> Void)?
     let onDelete: () -> Void
 
     @State private var copied = false
@@ -41,6 +44,9 @@ struct MessageActionBar: View {
                     try? await Task.sleep(for: .seconds(1.5))
                     copied = false
                 }
+            }
+            if let onSelectText {
+                actionButton("text.viewfinder", help: "Select Text") { onSelectText() }
             }
             actionButton("trash", help: "Delete") { onDelete() }
         }

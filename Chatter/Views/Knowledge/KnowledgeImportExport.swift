@@ -1,10 +1,11 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Wraps a `KnowledgeTransfer` folder tree so `fileExporter` can write an OKF
-/// bundle as a plain directory of markdown files (zip is a follow-up — see
-/// README). Import goes through `fileImporter` + `KnowledgeTransfer` directly
-/// and doesn't use this type.
+/// Wraps a folder tree so `fileExporter` can write it as a plain directory of
+/// markdown files (zip is a follow-up — see README): OKF bundles from
+/// `KnowledgeTransfer` and the skill pool from `SkillTransfer`. Import goes
+/// through `fileImporter` + the transfer enums directly and doesn't use this
+/// type.
 struct OKFBundleDocument: FileDocument {
     static var readableContentTypes: [UTType] { [.folder] }
     static var writableContentTypes: [UTType] { [.folder] }

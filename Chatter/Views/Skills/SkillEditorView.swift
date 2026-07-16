@@ -14,6 +14,9 @@ struct SkillEditorView: View {
     @State private var summary = ""
     @State private var content = ""
 
+    @State private var exportDocument: SkillFileDocument?
+    @State private var showExporter = false
+
     var body: some View {
         Form {
             Section {
@@ -48,6 +51,10 @@ struct SkillEditorView: View {
             ToolbarItem(placement: .cancellationAction) {
                 Button("Cancel") { dismiss() }
             }
+            ToolbarItem(placement: .secondaryAction) {
+                Button("Export…") { export() }
+                    .disabled(!canSave)
+            }
             ToolbarItem(placement: .confirmationAction) {
                 Button("Save") { save() }
                     .disabled(!canSave)
@@ -57,8 +64,12 @@ struct SkillEditorView: View {
         // No NavigationStack/toolbar in macOS sheets — see SheetHeader.
         .safeAreaInset(edge: .top, spacing: 0) {
             SheetHeader(title: skill == nil ? "New Skill" : "Edit Skill") {
-                Button("Cancel") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
+                HStack(spacing: 12) {
+                    Button("Cancel") { dismiss() }
+                        .keyboardShortcut(.cancelAction)
+                    Button("Export…") { export() }
+                        .disabled(!canSave)
+                }
             } trailing: {
                 Button("Save") { save() }
                     .keyboardShortcut(.defaultAction)
@@ -66,11 +77,28 @@ struct SkillEditorView: View {
             }
         }
         #endif
+        .fileExporter(
+            isPresented: $showExporter,
+            document: exportDocument,
+            contentType: SkillTransfer.markdownType,
+            defaultFilename: SkillToolProvider.slugify(name)
+        ) { _ in }
         .onAppear(perform: load)
     }
 
     private var canSave: Bool {
         !SkillToolProvider.slugify(name).isEmpty
+    }
+
+    /// Exports the current form state (not the stored row), so unsaved edits
+    /// land in the file.
+    private func export() {
+        exportDocument = SkillFileDocument(text: SkillCodec.serialize(
+            name: SkillToolProvider.slugify(name),
+            summary: summary.trimmingCharacters(in: .whitespacesAndNewlines),
+            content: content
+        ))
+        showExporter = true
     }
 
     private func load() {
