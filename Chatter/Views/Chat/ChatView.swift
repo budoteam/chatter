@@ -78,17 +78,21 @@ struct ChatView: View {
                     .frame(maxWidth: 720)
                     .frame(maxWidth: .infinity)
                 }
+                .scrollDismissesKeyboard(.interactively)
                 .onChange(of: lastMessageFingerprint) { scrollToBottom(proxy) }
                 .onChange(of: session.orderedMessages.count) { scrollToBottom(proxy) }
+                .onChange(of: viewModel.isSending) { scrollToBottom(proxy) }
                 .onAppear { scrollToBottom(proxy, animated: false) }
             }
         }
     }
 
     /// Streamed content + thinking of the newest message — drives auto-scroll.
+    /// Includes isStreaming so the scroll also fires when streaming ends and
+    /// the thoughts disclosure auto-collapses without a content change.
     private var lastMessageFingerprint: String {
         guard let last = session.orderedMessages.last else { return "" }
-        return last.content + (last.thinking ?? "")
+        return "\(last.isStreaming)|\(last.content.count)|\(last.thinking?.count ?? 0)"
     }
 
     // MARK: - Transcript grouping
@@ -187,10 +191,15 @@ struct ChatView: View {
     private let bottomID = "bottom-anchor"
 
     private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = true) {
-        if animated {
-            withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(bottomID, anchor: .bottom) }
-        } else {
-            proxy.scrollTo(bottomID, anchor: .bottom)
+        // One-tick hop: onChange fires inside the same update that removes the
+        // expanded thinking view; scrolling immediately would resolve bottomID
+        // against stale (pre-collapse) geometry.
+        Task { @MainActor in
+            if animated {
+                withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(bottomID, anchor: .bottom) }
+            } else {
+                proxy.scrollTo(bottomID, anchor: .bottom)
+            }
         }
     }
 

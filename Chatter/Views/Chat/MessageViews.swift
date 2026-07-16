@@ -152,7 +152,7 @@ struct ThoughtsDisclosure: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Button { withAnimation(.easeInOut(duration: 0.18)) { expanded.toggle() } } label: {
+            Button { expanded.toggle() } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "brain")
                         .font(.system(size: 10, weight: .medium))
@@ -178,6 +178,9 @@ struct ThoughtsDisclosure: View {
                     }
             }
         }
+        // Matches scrollToBottom's curve so the auto-collapse (isThinking →
+        // false) and the re-pin scroll compose instead of jumping.
+        .animation(.easeOut(duration: 0.2), value: isOpen)
     }
 }
 
@@ -196,9 +199,11 @@ struct ActivityGroupView: View {
         steps.filter { $0.role == .tool }.count
     }
 
+    private var isOpen: Bool { expanded || live }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Button { withAnimation(.easeInOut(duration: 0.18)) { expanded.toggle() } } label: {
+            Button { expanded.toggle() } label: {
                 HStack(spacing: 8) {
                     if live {
                         ProgressView().controlSize(.small)
@@ -220,7 +225,7 @@ struct ActivityGroupView: View {
             }
             .buttonStyle(.plain)
 
-            if expanded || live {
+            if isOpen {
                 VStack(alignment: .leading, spacing: 12) {
                     ForEach(steps) { StepView(message: $0) }
                 }
@@ -233,6 +238,9 @@ struct ActivityGroupView: View {
             in: RoundedRectangle(cornerRadius: 14, style: .continuous)
         )
         .padding(.leading, 36)  // aligns with the assistant text column
+        // Matches scrollToBottom's curve so the auto-collapse (live → false)
+        // and the re-pin scroll compose instead of jumping.
+        .animation(.easeOut(duration: 0.2), value: isOpen)
     }
 }
 
