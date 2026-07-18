@@ -134,7 +134,10 @@ final class PDFKnowledgeImporterTests: XCTestCase {
     func testInsertCreatesConceptsUnderPDFFolder() throws {
         let container = try ModelContainer(
             for: KnowledgeBundle.self, KnowledgeConcept.self,
-            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+            // In the hosted test process the `.automatic` default would hook
+            // the in-memory store into the app's CloudKit mirroring (crash on
+            // save: "No eligible connection available").
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         )
         let context = container.mainContext
         let bundle = KnowledgeBundle(name: "Docs")

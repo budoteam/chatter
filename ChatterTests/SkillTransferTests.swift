@@ -14,7 +14,10 @@ final class SkillTransferTests: XCTestCase {
     private func makeContext() throws -> ModelContext {
         let container = try ModelContainer(
             for: Skill.self, Agent.self,
-            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+            // In the hosted test process the `.automatic` default would hook
+            // the in-memory store into the app's CloudKit mirroring (crash on
+            // save: "No eligible connection available").
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         )
         self.container = container
         return container.mainContext

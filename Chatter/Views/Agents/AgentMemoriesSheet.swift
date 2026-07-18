@@ -9,40 +9,35 @@ struct AgentMemoriesSheet: View {
 
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
-    @Query(sort: \MemoryEntry.updatedAt, order: .reverse) private var allEntries: [MemoryEntry]
+    /// Scoped to this agent: an unfiltered query would load every agent's
+    /// memories into the view and re-render on any memory write.
+    @Query private var entries: [MemoryEntry]
+    /// Entries edited since the sheet opened — only those get a fresh
+    /// `updatedAt` (and the save) when the sheet closes.
+    @State private var dirtyIDs: Set<UUID> = []
 
-    private var entries: [MemoryEntry] {
-        allEntries.filter { $0.agentID == agent.id }
+    init(agent: Agent) {
+        self.agent = agent
+        let agentID = agent.id
+        _entries = Query(
+            filter: #Predicate { $0.agentID == agentID },
+            sort: \MemoryEntry.updatedAt,
+            order: .reverse
+        )
     }
 
     var body: some View {
-        #if os(macOS)
-        content
-            // ContentUnavailableView only takes its ideal size on macOS;
-            // without this the header+content unit centers in the sheet,
-            // leaving a gap above the header.
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .safeAreaInset(edge: .top, spacing: 0) {
-                SheetHeader(title: "Memories") {
-                    EmptyView()
-                } trailing: {
-                    Button("Done") { dismiss() }
-                        .keyboardShortcut(.defaultAction)
-                }
+        EditorSheet(
+            title: "Memories",
+            minWidth: 440, minHeight: 400,
+            trailing: {
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(.defaultAction)
             }
-            .frame(minWidth: 440, minHeight: 400)
-        #else
-        NavigationStack {
+        ) {
             content
-                .navigationTitle("Memories")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Done") { dismiss() }
-                    }
-                }
         }
-        #endif
+        .onDisappear(perform: saveDrafts)
     }
 
     @ViewBuilder
@@ -73,11 +68,23 @@ struct AgentMemoriesSheet: View {
         Binding(
             get: { entry.content },
             set: { newValue in
+                // In-memory only while typing: a context.save() per keystroke
+                // triggered a CloudKit export per character, and bumping
+                // updatedAt re-sorted the row out from under the cursor.
+                // Persisted once when the sheet closes.
                 entry.content = newValue
-                entry.updatedAt = Date()
-                try? context.save()
+                dirtyIDs.insert(entry.id)
             }
         )
+    }
+
+    private func saveDrafts() {
+        guard !dirtyIDs.isEmpty else { return }
+        for entry in entries where dirtyIDs.contains(entry.id) {
+            entry.updatedAt = .now
+        }
+        dirtyIDs.removeAll()
+        context.saveOrLog()
     }
 
     private func delete(at offsets: IndexSet) {
@@ -85,6 +92,6 @@ struct AgentMemoriesSheet: View {
         for index in offsets {
             context.delete(entries[index])
         }
-        try? context.save()
+        context.saveOrLog()
     }
 }

@@ -33,23 +33,11 @@ struct AgentsScreen: View {
             }
         }
         .sheet(item: $editingAgent) { agent in
-            agentEditor(agent)
+            AgentEditorView(agent: agent)
         }
         .sheet(isPresented: $showingNewAgent) {
-            agentEditor(nil)
+            AgentEditorView(agent: nil)
         }
-    }
-
-    /// On macOS the editor renders its own SheetHeader — a NavigationStack
-    /// toolbar in a sheet shifts the main window's content down on dismiss.
-    @ViewBuilder
-    private func agentEditor(_ agent: Agent?) -> some View {
-        #if os(macOS)
-        AgentEditorView(agent: agent)
-            .frame(minWidth: 500, minHeight: 620)
-        #else
-        NavigationStack { AgentEditorView(agent: agent) }
-        #endif
     }
 
     // MARK: - Cards
@@ -94,14 +82,7 @@ struct AgentsScreen: View {
             }
             .buttonStyle(.plain)
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, minHeight: 150, alignment: .leading)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(Theme.separator, lineWidth: 1)
-        )
-        .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overviewCardStyle()
         .onTapGesture { editingAgent = agent }
         .contextMenu {
             Button("New Chat") { startChat(agent) }
@@ -114,23 +95,7 @@ struct AgentsScreen: View {
     }
 
     private var newAgentCard: some View {
-        Button { showingNewAgent = true } label: {
-            VStack(spacing: 8) {
-                Image(systemName: "plus")
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundStyle(Theme.accent)
-                Text("New Agent")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity, minHeight: 150)
-            .background(Theme.accent.opacity(0.06), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(Theme.accent.opacity(0.35), style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
-            )
-        }
-        .buttonStyle(.plain)
+        AddEntityCard(title: "New Agent") { showingNewAgent = true }
     }
 
     // MARK: - Actions
@@ -149,6 +114,6 @@ struct AgentsScreen: View {
             context.delete(entry)
         }
         context.delete(agent)
-        try? context.save()
+        context.saveOrLog()
     }
 }

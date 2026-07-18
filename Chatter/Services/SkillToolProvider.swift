@@ -186,7 +186,7 @@ final class SkillToolProvider {
         agent: Agent,
         context: ModelContext
     ) throws -> String {
-        let args = arguments(from: argumentsJSON)
+        let args = JSONValue.parse(argumentsJSON).stringArguments
 
         switch namespacedName {
         case Self.readToolName:
@@ -229,7 +229,7 @@ final class SkillToolProvider {
             let skill = Skill(name: name, summary: summary, content: content)
             context.insert(skill)
             agent.skillIDs.append(skill.id)
-            try? context.save()
+            context.saveOrLog()
             return "Created skill “\(name)” and enabled it for you."
 
         case Self.updateToolName:
@@ -251,7 +251,7 @@ final class SkillToolProvider {
             if let summary, !summary.isEmpty { skill.summary = summary }
             if let content, !content.isEmpty { skill.content = content }
             skill.updatedAt = Date()
-            try? context.save()
+            context.saveOrLog()
             return "Updated skill “\(skill.name)”."
 
         default:
@@ -262,12 +262,27 @@ final class SkillToolProvider {
     // MARK: - Helpers
 
     /// Resolves skill IDs, silently skipping dangling references (a skill
-    /// deleted on another device may still be listed on an agent).
+    /// deleted on another device may still be listed on an agent). Scoped at
+    /// the database instead of fetching the whole pool per call.
+    ///
+    /// CloudKit sync can deliver two skills with the same (case-insensitive)
+    /// name; the fetch order is undefined, so duplicates are collapsed here —
+    /// the copy with the newest `updatedAt` wins, making reads and updates
+    /// deterministic until the pool is cleaned up.
     private func skills(for ids: [UUID], context: ModelContext) -> [Skill] {
         guard !ids.isEmpty else { return [] }
-        let all = (try? context.fetch(FetchDescriptor<Skill>())) ?? []
-        let wanted = Set(ids)
-        return all.filter { wanted.contains($0.id) }.sorted { $0.name < $1.name }
+        let descriptor = FetchDescriptor<Skill>(
+            predicate: #Predicate { ids.contains($0.id) },
+            sortBy: [SortDescriptor(\.name)]
+        )
+        let fetched = (try? context.fetch(descriptor)) ?? []
+        var newestByName: [String: Skill] = [:]
+        for skill in fetched {
+            let key = skill.name.lowercased()
+            if let current = newestByName[key], current.updatedAt >= skill.updatedAt { continue }
+            newestByName[key] = skill
+        }
+        return fetched.filter { newestByName[$0.name.lowercased()] === $0 }
     }
 
     private func match(name: String, in skills: [Skill]) -> Skill? {
@@ -281,14 +296,5 @@ final class SkillToolProvider {
             .replacingOccurrences(of: " ", with: "-")
         let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789-_")
         return String(lowered.unicodeScalars.filter { allowed.contains($0) })
-    }
-
-    private func arguments(from json: String) -> [String: String] {
-        guard case .object(let object) = JSONValue.parse(json) else { return [:] }
-        var result: [String: String] = [:]
-        for (key, value) in object {
-            if case .string(let s) = value { result[key] = s }
-        }
-        return result
     }
 }

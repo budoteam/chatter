@@ -15,6 +15,7 @@ struct KnowledgeBundleView: View {
     @State private var showExporter = false
     @State private var exportDocument: OKFBundleDocument?
     @State private var importReport: String?
+    @State private var isImporting = false
     @State private var showPDFImporter = false
     @State private var pdfImportRequest: PDFImportRequest?
     /// Held until the PDF sheet has fully dismissed, then shown — presenting
@@ -28,7 +29,18 @@ struct KnowledgeBundleView: View {
     }
 
     var body: some View {
-        NavigationStack(path: $path) {
+        // Drills into concept editors, so the navigation stack exists on both
+        // platforms; the macOS header sits outside it and stays visible while
+        // drilled in (see EditorSheet).
+        EditorSheet(
+            title: bundle.name,
+            minWidth: 560, minHeight: 620,
+            path: $path,
+            trailing: {
+                Button("Done") { finish() }
+                    .keyboardShortcut(.defaultAction)
+            }
+        ) {
             Form {
                 Section("Bundle") {
                     TextField("Name", text: $bundle.name)
@@ -109,21 +121,9 @@ struct KnowledgeBundleView: View {
             #if os(iOS)
             .scrollDismissesKeyboard(.interactively)
             #endif
-            #if os(iOS)
-            .navigationTitle(bundle.name)
-            .navigationBarTitleDisplayMode(.inline)
-            #endif
             .navigationDestination(for: KnowledgeConcept.self) { concept in
                 ConceptEditorView(concept: concept)
             }
-            #if os(iOS)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { finish() }
-                        .keyboardShortcut(.defaultAction)
-                }
-            }
-            #endif
             .fileImporter(
                 isPresented: $showImporter,
                 allowedContentTypes: [.folder]
@@ -152,8 +152,8 @@ struct KnowledgeBundleView: View {
                 Text(importReport ?? "")
             }
         }
-        // Attached to the NavigationStack, NOT the List: a second fileImporter
-        // on the same node as the folder importer can silently break on iOS.
+        // Attached outside the Form, NOT next to the folder importer inside:
+        // a second fileImporter on the same node can silently break on iOS.
         .fileImporter(
             isPresented: $showPDFImporter,
             allowedContentTypes: [.pdf],
@@ -172,25 +172,23 @@ struct KnowledgeBundleView: View {
                 pdfImportRequest = nil  // dismiss; report shown in onDismiss
             }
         }
-        #if os(macOS)
-        // No NavigationStack/toolbar chrome in macOS sheets — see SheetHeader.
-        // Attached outside the stack so Done stays visible while drilled into
-        // a concept.
-        .safeAreaInset(edge: .top, spacing: 0) {
-            SheetHeader(title: bundle.name) {
-                EmptyView()
-            } trailing: {
-                Button("Done") { finish() }
-                    .keyboardShortcut(.defaultAction)
+        // Block interaction while the folder is parsed off-actor and merged.
+        .disabled(isImporting)
+        .overlay {
+            if isImporting {
+                ZStack {
+                    Color.black.opacity(0.15).ignoresSafeArea()
+                    ProgressView("Importing…")
+                        .padding(Theme.Spacing.md)
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
             }
         }
-        .frame(minWidth: 560, minHeight: 620)
-        #endif
     }
 
     private func finish() {
         bundle.updatedAt = .now
-        try? context.save()
+        context.saveOrLog()
         dismiss()
     }
 
@@ -333,26 +331,32 @@ struct KnowledgeBundleView: View {
         concept.bundle = bundle
         context.insert(concept)
         bundle.updatedAt = .now
-        try? context.save()
+        context.saveOrLog()
         path.append(concept)
     }
 
     private func delete(_ concept: KnowledgeConcept) {
         context.delete(concept)
         bundle.updatedAt = .now
-        try? context.save()
+        context.saveOrLog()
     }
 
     private func handleImport(_ result: Result<URL, Error>) {
         switch result {
         case .success(let url):
-            do {
-                let report = try KnowledgeTransfer.importBundle(
-                    from: url, into: context, mergingInto: bundle
-                )
-                importReport = report.alertText
-            } catch {
-                importReport = "Import failed: \(error.localizedDescription)"
+            // Parse off-actor, then apply on the main actor — large bundles
+            // would otherwise freeze the UI in the fileImporter callback.
+            isImporting = true
+            Task { @MainActor in
+                defer { isImporting = false }
+                do {
+                    let parsed = try await KnowledgeTransfer.parseBundle(from: url)
+                    importReport = KnowledgeTransfer.applyImport(
+                        parsed, into: context, mergingInto: bundle
+                    ).alertText
+                } catch {
+                    importReport = "Import failed: \(error.localizedDescription)"
+                }
             }
         case .failure(let error):
             importReport = "Import failed: \(error.localizedDescription)"

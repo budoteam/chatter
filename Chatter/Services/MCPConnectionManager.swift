@@ -16,6 +16,15 @@ final class MCPConnectionManager: MCPClientProtocol {
     private var clients: [UUID: Client] = [:]
     /// namespacedName -> (owning server, original tool name)
     private var registry: [String: (serverID: UUID, original: String)] = [:]
+    /// Servers with a connect currently in flight. Without tracking them, a
+    /// concurrent sync/refresh would start a second connect whose late finish
+    /// leaks the first client's transport/subprocess on overwrite.
+    private var connecting: Set<UUID> = []
+    /// Namespace slug reserved by each connected/connecting server. Two
+    /// servers whose names sanitize to the same slug ("My API" vs "my-api")
+    /// would register identical tool names and silently route calls to the
+    /// wrong server, so the second one is refused.
+    private var slugs: [UUID: String] = [:]
     #if os(macOS)
     private var processes: [UUID: Process] = [:]
     #endif
@@ -33,17 +42,28 @@ final class MCPConnectionManager: MCPClientProtocol {
         // Connect anything not already connected — concurrently, so one slow
         // or unreachable server doesn't stall the rest.
         await withTaskGroup(of: Void.self) { group in
-            for config in enabled where clients[config.id] == nil {
+            for config in enabled where clients[config.id] == nil && !connecting.contains(config.id) {
                 group.addTask { await self.connect(config) }
             }
         }
     }
 
     func connect(_ config: MCPServerConfig) async {
+        guard clients[config.id] == nil, !connecting.contains(config.id) else { return }
+        let slug = Self.slug(for: config.name)
+        guard !slugs.values.contains(slug) else {
+            states[config.id] = .failed("'\(config.name)' has the same tool namespace as another connected server — rename one of them.")
+            AppLogger.mcp.error("MCP connect '\(config.name, privacy: .public)' refused: namespace slug '\(slug, privacy: .public)' already in use")
+            return
+        }
+        connecting.insert(config.id)
+        slugs[config.id] = slug
+        defer { connecting.remove(config.id) }
+
         states[config.id] = .connecting
+        let client = Client(name: "Chatter", version: "1.0.0")
         do {
             let transport = try makeTransport(for: config)
-            let client = Client(name: "Chatter", version: "1.0.0")
             _ = try await client.connect(transport: transport)
 
             let (tools, _) = try await client.listTools()
@@ -66,6 +86,17 @@ final class MCPConnectionManager: MCPClientProtocol {
             states[config.id] = .connected(toolCount: resolved.count)
             AppLogger.mcp.info("Connected MCP '\(config.name, privacy: .public)' — \(resolved.count) tools")
         } catch {
+            // Roll back whatever got as far as starting: a stdio subprocess
+            // launched in makeTransport, or a transport that connected before
+            // listTools threw — both would otherwise leak.
+            #if os(macOS)
+            processes[config.id]?.terminate()
+            processes[config.id] = nil
+            #endif
+            try? await Self.withHardTimeout(seconds: 5, label: "connect-cleanup") {
+                await client.disconnect()
+            }
+            slugs[config.id] = nil
             states[config.id] = .failed(error.localizedDescription)
             AppLogger.mcp.error("MCP connect '\(config.name, privacy: .public)' failed: \(error.localizedDescription, privacy: .public)")
         }
@@ -90,6 +121,7 @@ final class MCPConnectionManager: MCPClientProtocol {
             }
         }
         clients[serverID] = nil
+        slugs[serverID] = nil
         // Purge this server's tools from the registry.
         for t in toolsByServer[serverID] ?? [] {
             registry[t.namespacedName] = nil
@@ -250,11 +282,17 @@ final class MCPConnectionManager: MCPClientProtocol {
 
     /// Namespaces a tool name with a sanitized server slug so identically named
     /// tools on different servers stay distinct for the model.
-    static func namespaced(server: String, tool: String) -> String {
-        let slug = server.lowercased()
+    nonisolated static func namespaced(server: String, tool: String) -> String {
+        "\(slug(for: server))__\(tool)"
+    }
+
+    /// The sanitized server slug used as the tool-name namespace. Servers
+    /// whose names sanitize to the same slug collide in the registry and are
+    /// refused on connect.
+    nonisolated static func slug(for server: String) -> String {
+        String(server.lowercased()
             .map { $0.isLetter || $0.isNumber ? $0 : "_" }
-            .prefix(24)
-        return "\(String(slug))__\(tool)"
+            .prefix(24))
     }
 
     /// Resume-exactly-once bookkeeping for `withHardTimeout` (Swift doesn't

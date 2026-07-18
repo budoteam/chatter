@@ -9,6 +9,8 @@ struct SettingsView: View {
 
     @State private var apiKey = ""
     @State private var savedConfirmation = false
+    /// Keychain write failures — saving must not fail silently (log only).
+    @State private var keySaveError: String?
     @State private var editingServer: MCPServerConfig?
     @State private var showingNewServer = false
 
@@ -30,23 +32,11 @@ struct SettingsView: View {
         }
         .onAppear { apiKey = KeychainService.loadAPIKey() ?? "" }
         .sheet(item: $editingServer) { server in
-            serverEditor(server)
+            MCPServerEditorView(server: server)
         }
         .sheet(isPresented: $showingNewServer) {
-            serverEditor(nil)
+            MCPServerEditorView(server: nil)
         }
-    }
-
-    /// On macOS the editor renders its own SheetHeader — a NavigationStack
-    /// toolbar in a sheet shifts the main window's content down on dismiss.
-    @ViewBuilder
-    private func serverEditor(_ server: MCPServerConfig?) -> some View {
-        #if os(macOS)
-        MCPServerEditorView(server: server)
-            .frame(minWidth: 480, minHeight: 520)
-        #else
-        NavigationStack { MCPServerEditorView(server: server) }
-        #endif
     }
 
     // MARK: - API key
@@ -65,6 +55,10 @@ struct SettingsView: View {
             if savedConfirmation {
                 Label("Saved", systemImage: "checkmark.circle.fill")
                     .foregroundStyle(.green).font(.caption)
+            }
+            if let keySaveError {
+                Label(keySaveError, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red).font(.caption)
             }
             // Live connection status so a bad key (401 etc.) is visible here.
             if env.isLoadingModels {
@@ -226,6 +220,7 @@ struct SettingsView: View {
     // MARK: - Actions
 
     private func saveKey() {
+        keySaveError = nil
         do {
             try KeychainService.saveAPIKey(apiKey.trimmingCharacters(in: .whitespacesAndNewlines))
             env.refreshAPIKeyState()
@@ -236,6 +231,7 @@ struct SettingsView: View {
                 savedConfirmation = false
             }
         } catch {
+            keySaveError = error.localizedDescription
             AppLogger.ui.error("Save API key failed: \(error.localizedDescription, privacy: .public)")
         }
     }
@@ -243,6 +239,7 @@ struct SettingsView: View {
     private func clearKey() {
         KeychainService.deleteAPIKey()
         apiKey = ""
+        keySaveError = nil
         env.refreshAPIKeyState()
         env.models = []
     }
@@ -254,6 +251,6 @@ struct SettingsView: View {
     private func deleteServer(_ server: MCPServerConfig) {
         Task { await env.mcp.disconnect(serverID: server.id) }
         context.delete(server)
-        try? context.save()
+        context.saveOrLog()
     }
 }

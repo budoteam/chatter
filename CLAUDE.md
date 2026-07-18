@@ -25,7 +25,7 @@ xcodebuild -project Chatter.xcodeproj -scheme Chatter \
 xcodebuild -project Chatter.xcodeproj -scheme Chatter -destination 'platform=macOS' build
 ```
 
-Tests live in `ChatterTests` (OKF codec, knowledge transfer, PDF importer): `xcodebuild ... -destination 'platform=macOS' test`. Signing is automatic with the team from `project.yml`; entitlements are per-platform files (`Chatter/Chatter-iOS.entitlements`, `Chatter/Chatter-macOS.entitlements` — the APNs entitlement key differs between the platforms, and only macOS carries the sandbox key). TestFlight release: bump `CURRENT_PROJECT_VERSION` in `project.yml`, `./generate.sh`, archive with `xcodebuild ... archive -allowProvisioningUpdates`, upload via Xcode Organizer. **If the release adds or changes any `@Model`, deploy the CloudKit schema to Production first** (see below).
+Tests live in `ChatterTests` (codecs, transfer, tool providers, plus `ChatEngineTests` driving the tool loop against the protocol mocks): `xcodebuild ... -destination 'platform=macOS' test`. Signing is automatic with the team from `project.yml`; entitlements are per-platform files (`Chatter/Chatter-iOS.entitlements`, `Chatter/Chatter-macOS.entitlements` — the APNs entitlement key differs between the platforms, and only macOS carries the sandbox key). TestFlight release: bump `CURRENT_PROJECT_VERSION` in `project.yml`, `./generate.sh`, archive with `xcodebuild ... archive -allowProvisioningUpdates`, upload via Xcode Organizer. **If the release adds or changes any `@Model`, deploy the CloudKit schema to Production first** (see below).
 
 ## Architecture
 
@@ -35,7 +35,7 @@ The data flow for a chat turn: `ComposerView` → `ChatViewModel` → `ChatEngin
 - **`ChatEngine`** drives one assistant turn including the agentic tool loop: stream the response → if the model requested tools, execute them via MCP, append `tool` messages, and stream again — up to 42 tool rounds, after which one last round is streamed *without* offering tools so the turn always ends in a text answer. Streaming writes into a live SwiftData `Message` with `isStreaming = true`; token deltas are **buffered and flushed at ~12 Hz** because mutating the `@Model` per token re-renders (and re-parses Markdown for) the whole message and stalls the main thread. Preserve this batching when touching the streaming path.
 - **`MCPConnectionManager`** owns live MCP `Client` sessions and a **namespaced tool registry** (`serverName.toolName`) so tools from different servers can't collide; `ChatEngine` calls tools by namespaced name. Transports: Streamable HTTP + legacy SSE (`LegacySSEClientTransport`) on all platforms; stdio subprocesses on macOS only (`#if os(macOS)` — this is why the macOS sandbox is disabled in `Chatter-macOS.entitlements`).
 - **`OllamaService`** streams NDJSON from Ollama Cloud `/api/chat` (deltas, thinking traces, tool calls). The API key lives in the Keychain via `KeychainService` (iCloud-synced), never in SwiftData or UserDefaults.
-- **Services are behind protocols** (`Services/Protocols/`): `OllamaServiceProtocol`, `MCPClientProtocol` — `ChatEngine` and views depend on the protocols.
+- **Services are behind protocols** (`Services/Protocols/`): `OllamaServiceProtocol`, `MCPClientProtocol`, `KnowledgeToolProviding` — `ChatEngine` and views depend on the protocols (the mocking seam for `ChatterTests`).
 
 ### SwiftData models must stay CloudKit-compatible
 
@@ -55,4 +55,6 @@ Views live under `Views/` (Sidebar, Chat, Agents, Settings, Components); shared 
 
 - Commit messages are written in German.
 - Logging goes through `AppLogger` (os.Logger categories: `api`, `mcp`, `data`, …) with `privacy: .public` annotations where needed.
+- Save SwiftData contexts via `context.saveOrLog()` (extension in `Persistence.swift`) — best-effort, but failures are logged via `AppLogger.data` instead of disappearing like the former `try? context.save()`.
+- In-memory test containers need `cloudKitDatabase: .none`: tests run hosted in the app process, and the `.automatic` default hooks the store into the app's CloudKit mirroring (crash on first save: "No eligible connection available").
 - `NSAllowsArbitraryLoads` is intentionally true (self-hosted MCP servers over plain HTTP on LAN/Tailscale) — don't "fix" it.

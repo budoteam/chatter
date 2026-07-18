@@ -136,7 +136,7 @@ final class KnowledgeToolProvider {
             // never hand the model an empty result with no explanation.
             return "No knowledge bundles are currently available for this agent."
         }
-        let args = arguments(from: argumentsJSON)
+        let args = JSONValue.parse(argumentsJSON).stringArguments
 
         switch namespacedName {
         case Self.listToolName:
@@ -262,20 +262,14 @@ final class KnowledgeToolProvider {
     // MARK: - Helpers
 
     /// Resolves bundle IDs, silently skipping dangling references (a bundle
-    /// deleted on another device may still be listed on an agent).
+    /// deleted on another device may still be listed on an agent). Scoped at
+    /// the database instead of fetching every bundle per call.
     private func bundles(for ids: [UUID], context: ModelContext) -> [KnowledgeBundle] {
         guard !ids.isEmpty else { return [] }
-        let all = (try? context.fetch(FetchDescriptor<KnowledgeBundle>())) ?? []
-        let wanted = Set(ids)
-        return all.filter { wanted.contains($0.id) }.sorted { $0.name < $1.name }
-    }
-
-    private func arguments(from json: String) -> [String: String] {
-        guard case .object(let object) = JSONValue.parse(json) else { return [:] }
-        var result: [String: String] = [:]
-        for (key, value) in object {
-            if case .string(let s) = value { result[key] = s }
-        }
-        return result
+        let descriptor = FetchDescriptor<KnowledgeBundle>(
+            predicate: #Predicate { ids.contains($0.id) },
+            sortBy: [SortDescriptor(\.name)]
+        )
+        return (try? context.fetch(descriptor)) ?? []
     }
 }

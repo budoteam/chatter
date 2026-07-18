@@ -159,7 +159,7 @@ final class MemoryToolProvider {
         agentID: UUID?,
         context: ModelContext
     ) throws -> String {
-        let args = arguments(from: argumentsJSON)
+        let args = JSONValue.parse(argumentsJSON).stringArguments
 
         switch namespacedName {
         case Self.saveToolName:
@@ -171,7 +171,7 @@ final class MemoryToolProvider {
             }
             let entry = MemoryEntry(agentID: agentID, content: content)
             context.insert(entry)
-            try? context.save()
+            context.saveOrLog()
             return "Saved memory [\(entry.shortID)]."
 
         case Self.updateToolName:
@@ -185,7 +185,7 @@ final class MemoryToolProvider {
             let entry = try entry(matching: id, agentID: agentID, context: context)
             entry.content = content
             entry.updatedAt = Date()
-            try? context.save()
+            context.saveOrLog()
             return "Updated memory [\(entry.shortID)]."
 
         case Self.deleteToolName:
@@ -193,7 +193,7 @@ final class MemoryToolProvider {
             let entry = try entry(matching: id, agentID: agentID, context: context)
             let shortID = entry.shortID
             context.delete(entry)
-            try? context.save()
+            context.saveOrLog()
             return "Deleted memory [\(shortID)]."
 
         default:
@@ -203,13 +203,14 @@ final class MemoryToolProvider {
 
     // MARK: - Helpers
 
-    /// This agent's entries, newest first. Fetch-all-and-filter matches the
-    /// codebase style; memory counts are small by design.
+    /// This agent's entries, newest first. Scoped at the database instead of
+    /// fetching every agent's entries and filtering in memory.
     private func entries(for agentID: UUID?, context: ModelContext) -> [MemoryEntry] {
-        let all = (try? context.fetch(FetchDescriptor<MemoryEntry>())) ?? []
-        return all
-            .filter { $0.agentID == agentID }
-            .sorted { $0.updatedAt > $1.updatedAt }
+        let descriptor = FetchDescriptor<MemoryEntry>(
+            predicate: #Predicate { $0.agentID == agentID },
+            sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]
+        )
+        return (try? context.fetch(descriptor)) ?? []
     }
 
     /// Case-insensitive prefix match against this agent's entries.
@@ -224,15 +225,6 @@ final class MemoryToolProvider {
         guard let match = matches.first else { throw ToolError.entryNotFound(id) }
         guard matches.count == 1 else { throw ToolError.ambiguousID(id) }
         return match
-    }
-
-    private func arguments(from json: String) -> [String: String] {
-        guard case .object(let object) = JSONValue.parse(json) else { return [:] }
-        var result: [String: String] = [:]
-        for (key, value) in object {
-            if case .string(let s) = value { result[key] = s }
-        }
-        return result
     }
 
     private static let dateFormatter: DateFormatter = {

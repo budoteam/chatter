@@ -10,6 +10,7 @@ struct KnowledgeScreen: View {
     @State private var openBundle: KnowledgeBundle?
     @State private var showingImporter = false
     @State private var importReport: String?
+    @State private var isImporting = false
 
     private let columns = [GridItem(.adaptive(minimum: 210, maximum: 300), spacing: 16)]
 
@@ -54,6 +55,18 @@ struct KnowledgeScreen: View {
         } message: {
             Text(importReport ?? "")
         }
+        // Block interaction while the folder is parsed off-actor and merged.
+        .disabled(isImporting)
+        .overlay {
+            if isImporting {
+                ZStack {
+                    Color.black.opacity(0.15).ignoresSafeArea()
+                    ProgressView("Importing…")
+                        .padding(Theme.Spacing.md)
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+            }
+        }
     }
 
     // MARK: - Cards
@@ -81,14 +94,7 @@ struct KnowledgeScreen: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Theme.accent)
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, minHeight: 150, alignment: .leading)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(Theme.separator, lineWidth: 1)
-        )
-        .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overviewCardStyle()
         .onTapGesture { openBundle = bundle }
         .contextMenu {
             Button("Open") { openBundle = bundle }
@@ -98,27 +104,10 @@ struct KnowledgeScreen: View {
     }
 
     private var addCard: some View {
-        Menu {
+        AddEntityCard(title: "Add Knowledge", menuContent: {
             Button("New Bundle") { createBundle() }
             Button("Import OKF Folder…") { showingImporter = true }
-        } label: {
-            VStack(spacing: 8) {
-                Image(systemName: "plus")
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundStyle(Theme.accent)
-                Text("Add Knowledge")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity, minHeight: 150)
-            .background(Theme.accent.opacity(0.06), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(Theme.accent.opacity(0.35), style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
-            )
-        }
-        .buttonStyle(.plain)
-        .menuStyle(.borderlessButton)
+        })
     }
 
     // MARK: - Actions
@@ -126,7 +115,7 @@ struct KnowledgeScreen: View {
     private func createBundle() {
         let bundle = KnowledgeBundle(name: "New Bundle")
         context.insert(bundle)
-        try? context.save()
+        context.saveOrLog()
         openBundle = bundle
     }
 
@@ -139,17 +128,23 @@ struct KnowledgeScreen: View {
             agent.knowledgeBundleIDs.removeAll { $0 == bundle.id }
         }
         context.delete(bundle)
-        try? context.save()
+        context.saveOrLog()
     }
 
     private func handleImport(_ result: Result<URL, Error>) {
         switch result {
         case .success(let url):
-            do {
-                let report = try KnowledgeTransfer.importBundle(from: url, into: context)
-                importReport = report.alertText
-            } catch {
-                importReport = "Import failed: \(error.localizedDescription)"
+            // Parse off-actor, then apply on the main actor — large bundles
+            // would otherwise freeze the UI in the fileImporter callback.
+            isImporting = true
+            Task { @MainActor in
+                defer { isImporting = false }
+                do {
+                    let parsed = try await KnowledgeTransfer.parseBundle(from: url)
+                    importReport = KnowledgeTransfer.applyImport(parsed, into: context).alertText
+                } catch {
+                    importReport = "Import failed: \(error.localizedDescription)"
+                }
             }
         case .failure(let error):
             importReport = "Import failed: \(error.localizedDescription)"

@@ -43,33 +43,6 @@ enum JSONValue: Codable, Hashable {
         }
     }
 
-    /// Bridge from a Foundation JSON object (`[String: Any]`, arrays, etc.).
-    init(any value: Any) {
-        switch value {
-        case let v as Bool: self = .bool(v)
-        case let v as Int: self = .number(Double(v))
-        case let v as Double: self = .number(v)
-        case let v as String: self = .string(v)
-        case let v as [Any]: self = .array(v.map(JSONValue.init(any:)))
-        case let v as [String: Any]:
-            self = .object(v.mapValues(JSONValue.init(any:)))
-        case is NSNull: self = .null
-        default: self = .null
-        }
-    }
-
-    /// Bridge to a Foundation JSON object for use with existing APIs.
-    var anyValue: Any {
-        switch self {
-        case .null: return NSNull()
-        case .bool(let b): return b
-        case .number(let d): return d
-        case .string(let s): return s
-        case .array(let a): return a.map(\.anyValue)
-        case .object(let o): return o.mapValues(\.anyValue)
-        }
-    }
-
     /// Compact JSON string.
     var jsonString: String {
         guard let data = try? JSONEncoder().encode(self),
@@ -84,5 +57,18 @@ enum JSONValue: Codable, Hashable {
             return .object([:])
         }
         return value
+    }
+}
+
+extension JSONValue {
+    /// String-only view of a tool-call argument object — the shape every
+    /// built-in tool provider consumes. Non-string values are dropped.
+    var stringArguments: [String: String] {
+        guard case .object(let object) = self else { return [:] }
+        var result: [String: String] = [:]
+        for (key, value) in object {
+            if case .string(let s) = value { result[key] = s }
+        }
+        return result
     }
 }

@@ -54,7 +54,7 @@ struct WebToolProvider {
     // MARK: - Dispatch
 
     func call(name: String, argumentsJSON: String) async throws -> String {
-        let args = Self.arguments(from: argumentsJSON)
+        let args = JSONValue.parse(argumentsJSON).stringArguments
         switch name {
         case Self.searchToolName:
             guard let query = args["query"], !query.isEmpty else {
@@ -103,15 +103,6 @@ struct WebToolProvider {
     }
 
     // MARK: - Helpers
-
-    private static func arguments(from json: String) -> [String: String] {
-        guard case .object(let object) = JSONValue.parse(json) else { return [:] }
-        var result: [String: String] = [:]
-        for (key, value) in object {
-            if case .string(let s) = value { result[key] = s }
-        }
-        return result
-    }
 
     enum ToolError: LocalizedError {
         case unknownTool(String)

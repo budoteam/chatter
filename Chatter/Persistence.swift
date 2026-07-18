@@ -64,9 +64,29 @@ enum Persistence {
 
         // Last resort: in-memory so the app never crashes on launch.
         let memoryConfig = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
-        // swiftlint:disable:next force_try
-        let container = try! ModelContainer(for: schema, configurations: memoryConfig)
-        AppLogger.data.error("SwiftData falling back to in-memory store")
-        return container
+        do {
+            let container = try ModelContainer(for: schema, configurations: memoryConfig)
+            AppLogger.data.error("SwiftData falling back to in-memory store")
+            return container
+        } catch {
+            // Even the in-memory container failed — the schema itself is
+            // broken. Crash with a diagnosable message instead of a bare trap.
+            AppLogger.data.fault("In-memory SwiftData container failed: \(error, privacy: .public)")
+            preconditionFailure("SwiftData schema cannot be instantiated even in-memory: \(error.localizedDescription)")
+        }
+    }
+}
+
+extension ModelContext {
+    /// Best-effort save that logs failures instead of swallowing them
+    /// silently (`try? context.save()`): a failed save (validation, CloudKit
+    /// quota) used to vanish without a trace, leaving the UI showing state
+    /// that was never persisted.
+    func saveOrLog() {
+        do {
+            try save()
+        } catch {
+            AppLogger.data.error("SwiftData save failed: \(error.localizedDescription, privacy: .public)")
+        }
     }
 }

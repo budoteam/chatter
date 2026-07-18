@@ -27,9 +27,16 @@ final class ChatSession {
         self.modelId = modelId
     }
 
-    /// Messages in stable chronological order.
+    /// Messages in stable chronological order. CloudKit merges can produce
+    /// duplicate orderIndex values (the same session used offline on two
+    /// devices), so ties break deterministically — otherwise the order can
+    /// flip between renders and devices.
     var orderedMessages: [Message] {
-        (messages ?? []).sorted { $0.orderIndex < $1.orderIndex }
+        (messages ?? []).sorted {
+            if $0.orderIndex != $1.orderIndex { return $0.orderIndex < $1.orderIndex }
+            if $0.createdAt != $1.createdAt { return $0.createdAt < $1.createdAt }
+            return $0.id.uuidString < $1.id.uuidString
+        }
     }
 
     var nextOrderIndex: Int {

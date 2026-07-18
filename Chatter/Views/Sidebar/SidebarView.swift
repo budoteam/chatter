@@ -225,7 +225,7 @@ struct SidebarView: View {
             // teardown saves before deleting the models it writes to.
             await env.cancelTurnAndWait(for: session)
             context.delete(session)
-            try? context.save()
+            context.saveOrLog()
         }
     }
 }

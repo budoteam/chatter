@@ -9,14 +9,14 @@ import SwiftData
 @MainActor
 final class ChatEngine {
     private let ollama: OllamaServiceProtocol
-    private let mcp: MCPConnectionManager
-    private let knowledge: KnowledgeToolProvider
+    private let mcp: MCPClientProtocol
+    private let knowledge: KnowledgeToolProviding
     private let web: WebToolProvider
     private let memory = MemoryToolProvider()
     private let skills = SkillToolProvider()
     private let maxToolIterations = 42
 
-    init(ollama: OllamaServiceProtocol, mcp: MCPConnectionManager, knowledge: KnowledgeToolProvider) {
+    init(ollama: OllamaServiceProtocol, mcp: MCPClientProtocol, knowledge: KnowledgeToolProviding) {
         self.ollama = ollama
         self.mcp = mcp
         self.knowledge = knowledge
@@ -49,7 +49,7 @@ final class ChatEngine {
         userMsg.session = session
         context.insert(userMsg)
         session.updatedAt = .now
-        try? context.save()
+        context.saveOrLog()
 
         try await runTurns(model: model, session: session, agent: agent, context: context)
     }
@@ -205,7 +205,7 @@ final class ChatEngine {
                 flushPending(force: true)
                 assistant.isStreaming = false
                 session.updatedAt = .now
-                try? context.save()
+                context.saveOrLog()
                 return
             } catch {
                 flushPending(force: true)
@@ -215,7 +215,7 @@ final class ChatEngine {
                 if assistant.content.isEmpty {
                     context.delete(assistant)
                 }
-                try? context.save()
+                context.saveOrLog()
                 throw error
             }
             assistant.isStreaming = false
@@ -226,7 +226,7 @@ final class ChatEngine {
             if toolCalls.isEmpty || finalRound {
                 maybeAutoTitle(session)
                 session.updatedAt = .now
-                try? context.save()
+                context.saveOrLog()
                 return
             }
 
@@ -234,12 +234,33 @@ final class ChatEngine {
             assistant.toolCalls = toolCalls.map {
                 ToolCall(name: $0.function.name, argumentsJSON: $0.function.arguments.jsonString)
             }
-            try? context.save()
+            context.saveOrLog()
 
+            /// Stop mid-execution answers every call the model is still
+            /// waiting on with a cancellation marker: `toolCalls` persisted
+            /// without their tool responses would be replayed on the next
+            /// send and make every later request structurally invalid.
+            func cancelUnanswered(from index: Int) {
+                for unanswered in toolCalls[index...] {
+                    let toolMsg = Message(
+                        role: .tool, content: "Cancelled by user.",
+                        orderIndex: session.nextOrderIndex, toolName: unanswered.function.name
+                    )
+                    toolMsg.session = session
+                    context.insert(toolMsg)
+                }
+                session.updatedAt = .now
+                context.saveOrLog()
+            }
+
+            var answered = 0
             for call in toolCalls {
                 // Stop must abort the turn even between/while tool calls —
                 // a swallowed CancellationError would keep the loop running.
-                try Task.checkCancellation()
+                if Task.isCancelled {
+                    cancelUnanswered(from: answered)
+                    return
+                }
                 let name = call.function.name
                 let argsJSON = call.function.arguments.jsonString
                 let result: String
@@ -265,7 +286,8 @@ final class ChatEngine {
                         result = try await mcp.callTool(namespacedName: name, argumentsJSON: argsJSON)
                     }
                 } catch is CancellationError {
-                    throw CancellationError()
+                    cancelUnanswered(from: answered)
+                    return
                 } catch {
                     result = "Tool error: \(error.localizedDescription)"
                 }
@@ -275,9 +297,10 @@ final class ChatEngine {
                 )
                 toolMsg.session = session
                 context.insert(toolMsg)
+                answered += 1
             }
             session.updatedAt = .now
-            try? context.save()
+            context.saveOrLog()
             // Loop: model gets another turn with the tool results in history.
         }
     }

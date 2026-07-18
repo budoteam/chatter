@@ -25,6 +25,35 @@ struct MCPServerEditorView: View {
     }
 
     var body: some View {
+        EditorSheet(
+            title: server == nil ? "New Server" : "Edit Server",
+            minWidth: 480, minHeight: 520,
+            leading: {
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+            },
+            trailing: {
+                Button("Save") { save() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!isValid)
+            }
+        ) {
+            formContent
+        }
+        .onAppear(perform: load)
+        .confirmationDialog(
+            "Delete this MCP server?",
+            isPresented: $showingDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) { delete() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes the server configuration. This can't be undone.")
+        }
+    }
+
+    private var formContent: some View {
         Form {
             Section("Server") {
                 TextField("Name", text: $name)
@@ -80,40 +109,6 @@ struct MCPServerEditorView: View {
             }
         }
         .formStyle(.grouped)
-        #if os(iOS)
-        .navigationTitle(server == nil ? "New Server" : "Edit Server")
-        .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("Cancel") { dismiss() }
-            }
-            ToolbarItem(placement: .confirmationAction) {
-                Button("Save") { save() }.disabled(!isValid)
-            }
-        }
-        #else
-        // No NavigationStack/toolbar in macOS sheets — see SheetHeader.
-        .safeAreaInset(edge: .top, spacing: 0) {
-            SheetHeader(title: server == nil ? "New Server" : "Edit Server") {
-                Button("Cancel") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-            } trailing: {
-                Button("Save") { save() }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(!isValid)
-            }
-        }
-        #endif
-        .onAppear(perform: load)
-        .confirmationDialog(
-            "Delete this MCP server?",
-            isPresented: $showingDeleteConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Delete", role: .destructive) { delete() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This removes the server configuration. This can't be undone.")
-        }
     }
 
     private var isValid: Bool {
@@ -146,7 +141,7 @@ struct MCPServerEditorView: View {
         target.args = argsText.split(separator: " ").map(String.init)
         target.enabled = enabled
         if server == nil { context.insert(target) }
-        try? context.save()
+        context.saveOrLog()
 
         // Reconnect to reflect the change.
         let id = target.id
@@ -162,7 +157,7 @@ struct MCPServerEditorView: View {
         let id = server.id
         Task { await env.mcp.disconnect(serverID: id) }
         context.delete(server)
-        try? context.save()
+        context.saveOrLog()
         dismiss()
     }
 }

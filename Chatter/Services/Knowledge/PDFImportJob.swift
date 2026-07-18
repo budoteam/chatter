@@ -59,7 +59,7 @@ final class PDFImportJob {
                     return .ok(pdf)
                 }.value
 
-                let pdf: PDFKnowledgeImporter.ExtractedPDF
+                var pdf: PDFKnowledgeImporter.ExtractedPDF
                 switch outcome {
                 case .unreadable:
                     report.warnings.append("\(fileName): could not read the file")
@@ -81,6 +81,17 @@ final class PDFImportJob {
                     continue
                 }
 
+                // Cap the working text at what the conversion pipeline can
+                // use: huge PDFs would otherwise keep the raw data, the
+                // PDFDocument and the full extracted text in memory at once.
+                let textCap = PDFKnowledgeImporter.maxChunksPerPDF * PDFKnowledgeImporter.chunkMaxChars
+                if pdf.text.count > textCap {
+                    pdf.text = String(pdf.text.prefix(textCap))
+                    report.warnings.append(
+                        "\(fileName): very large PDF — only the first ~\(textCap) characters were converted"
+                    )
+                }
+
                 // nil → the run was cancelled mid-conversion.
                 guard let concepts = await convert(pdf: pdf, ollama: ollama, model: model) else {
                     break
@@ -95,7 +106,7 @@ final class PDFImportJob {
                 )
                 // Save per PDF so cancellation keeps completed documents.
                 bundle.updatedAt = .now
-                try? context.save()
+                context.saveOrLog()
                 handled += 1
             }
 

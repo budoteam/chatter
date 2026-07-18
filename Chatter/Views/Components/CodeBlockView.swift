@@ -62,7 +62,6 @@ struct CodeBlockView: View {
     let language: String?
     let content: String
 
-    @State private var copied = false
     @State private var showExporter = false
     @State private var exportDocument: CodeFileDocument?
     @State private var exportFilename = ""
@@ -76,14 +75,8 @@ struct CodeBlockView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 12)
-                headerButton(copied ? "checkmark" : "doc.on.doc", help: "Copy code") {
-                    Pasteboard.copy(content)
-                    copied = true
-                    Task { @MainActor in
-                        try? await Task.sleep(for: .seconds(1.5))
-                        copied = false
-                    }
-                }
+                CopyButton(help: "Copy code") { Pasteboard.copy(content) }
+                    .foregroundStyle(.tertiary)
                 headerButton("square.and.arrow.down", help: "Save as file") {
                     exportDocument = CodeFileDocument(text: content)
                     exportFilename = defaultFilename
@@ -135,5 +128,7 @@ struct CodeBlockView: View {
         .buttonStyle(.plain)
         .foregroundStyle(.tertiary)
         .help(help)
+        // Icon-only button: .help is no VoiceOver label.
+        .accessibilityLabel(Text(help))
     }
 }

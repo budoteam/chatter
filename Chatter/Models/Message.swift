@@ -87,6 +87,12 @@ final class Message {
 
 /// An image attached to a user message, stored as downscaled Base64 JPEG.
 struct ImageAttachment: Codable, Identifiable, Hashable {
+    /// Total Base64 size budget for all attachments of one message. CloudKit
+    /// rejects records whose non-asset fields exceed ~1 MB, and an oversized
+    /// message record would stall sync of the whole chat — the composer
+    /// refuses images that would push a message past this budget.
+    static let maxBase64BytesPerMessage = 700_000
+
     var id: UUID = UUID()
     /// Raw Base64 JPEG (no `data:` prefix), ready for Ollama's `images` array.
     var base64: String
@@ -99,12 +105,4 @@ struct ToolCall: Codable, Identifiable, Hashable {
     var name: String
     /// JSON-encoded argument object (kept as a string for portability).
     var argumentsJSON: String
-
-    var arguments: [String: Any] {
-        guard let data = argumentsJSON.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return [:]
-        }
-        return obj
-    }
 }

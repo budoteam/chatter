@@ -38,6 +38,30 @@ struct AgentEditorView: View {
                            "6D4C41", "D63031", "F39C12", "2D3436"]
 
     var body: some View {
+        EditorSheet(
+            title: agent == nil ? "New Agent" : "Edit Agent",
+            minWidth: 500, minHeight: 620,
+            leading: {
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+            },
+            trailing: {
+                Button("Save") { save() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        ) {
+            formContent
+        }
+        .onAppear(perform: load)
+        .sheet(isPresented: $showMemories) {
+            if let agent {
+                AgentMemoriesSheet(agent: agent)
+            }
+        }
+    }
+
+    private var formContent: some View {
         Form {
             Section("Identity") {
                 TextField("Name", text: $name)
@@ -178,36 +202,6 @@ struct AgentEditorView: View {
             }
         }
         .formStyle(.grouped)
-        #if os(iOS)
-        .navigationTitle(agent == nil ? "New Agent" : "Edit Agent")
-        .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("Cancel") { dismiss() }
-            }
-            ToolbarItem(placement: .confirmationAction) {
-                Button("Save") { save() }
-                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
-            }
-        }
-        #else
-        // No NavigationStack/toolbar in macOS sheets — see SheetHeader.
-        .safeAreaInset(edge: .top, spacing: 0) {
-            SheetHeader(title: agent == nil ? "New Agent" : "Edit Agent") {
-                Button("Cancel") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-            } trailing: {
-                Button("Save") { save() }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
-            }
-        }
-        #endif
-        .onAppear(perform: load)
-        .sheet(isPresented: $showMemories) {
-            if let agent {
-                AgentMemoriesSheet(agent: agent)
-            }
-        }
     }
 
     private var iconPicker: some View {
@@ -306,7 +300,7 @@ struct AgentEditorView: View {
         if agent == nil {
             context.insert(target)
         }
-        try? context.save()
+        context.saveOrLog()
         dismiss()
     }
 }

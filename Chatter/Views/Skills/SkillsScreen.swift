@@ -20,6 +20,10 @@ struct SkillsScreen: View {
     @State private var showFolderExporter = false
     @State private var showImporter = false
     @State private var importReport: String?
+    /// The report alert doubles for export failures — the title tracks which
+    /// operation produced the report.
+    @State private var reportTitle = "Skill Import"
+    @State private var isImporting = false
 
     var body: some View {
         Group {
@@ -54,6 +58,7 @@ struct SkillsScreen: View {
             defaultFilename: exportingSkillName
         ) { result in
             if case .failure(let error) = result {
+                reportTitle = "Skill Export"
                 importReport = "Export failed: \(error.localizedDescription)"
             }
         }
@@ -90,6 +95,7 @@ struct SkillsScreen: View {
             defaultFilename: "Skills"
         ) { result in
             if case .failure(let error) = result {
+                reportTitle = "Skill Export"
                 importReport = "Export failed: \(error.localizedDescription)"
             }
         }
@@ -101,7 +107,7 @@ struct SkillsScreen: View {
             handleImport(result)
         }
         .alert(
-            "Skill Import",
+            reportTitle,
             isPresented: Binding(
                 get: { importReport != nil },
                 set: { if !$0 { importReport = nil } }
@@ -112,10 +118,22 @@ struct SkillsScreen: View {
             Text(importReport ?? "")
         }
         .sheet(item: $editingSkill) { skill in
-            skillEditor(skill)
+            SkillEditorView(skill: skill)
         }
         .sheet(isPresented: $showingNewSkill) {
-            skillEditor(nil)
+            SkillEditorView(skill: nil)
+        }
+        // Block interaction while the files are parsed off-actor and merged.
+        .disabled(isImporting)
+        .overlay {
+            if isImporting {
+                ZStack {
+                    Color.black.opacity(0.15).ignoresSafeArea()
+                    ProgressView("Importing…")
+                        .padding(Theme.Spacing.md)
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+            }
         }
     }
 
@@ -134,18 +152,6 @@ struct SkillsScreen: View {
         .contentShape(Rectangle())
     }
 
-    /// On macOS the editor renders its own SheetHeader — a NavigationStack
-    /// toolbar in a sheet shifts the main window's content down on dismiss.
-    @ViewBuilder
-    private func skillEditor(_ skill: Skill?) -> some View {
-        #if os(macOS)
-        SkillEditorView(skill: skill)
-            .frame(minWidth: 480, minHeight: 480)
-        #else
-        NavigationStack { SkillEditorView(skill: skill) }
-        #endif
-    }
-
     // MARK: - Import / Export
 
     private func export(_ skill: Skill) {
@@ -155,9 +161,17 @@ struct SkillsScreen: View {
     }
 
     private func handleImport(_ result: Result<[URL], Error>) {
+        reportTitle = "Skill Import"
         switch result {
         case .success(let urls):
-            importReport = SkillTransfer.importSkills(from: urls, into: context).alertText
+            // Parse off-actor, then apply on the main actor — large imports
+            // would otherwise freeze the UI in the fileImporter callback.
+            isImporting = true
+            Task { @MainActor in
+                defer { isImporting = false }
+                let parsed = await SkillTransfer.parseSkills(from: urls)
+                importReport = SkillTransfer.applyImport(parsed, into: context).alertText
+            }
         case .failure(let error):
             importReport = "Import failed: \(error.localizedDescription)"
         }
@@ -177,6 +191,6 @@ struct SkillsScreen: View {
             agent.skillIDs.removeAll { $0 == skill.id }
         }
         context.delete(skill)
-        try? context.save()
+        context.saveOrLog()
     }
 }

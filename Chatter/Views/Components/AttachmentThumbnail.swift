@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 #if canImport(UIKit)
@@ -29,23 +30,31 @@ struct AttachmentThumbnail: View {
     var size: CGFloat = 56
     var onRemove: (() -> Void)? = nil
 
-    /// Plain box, deliberately not observed: mutating it inside `body` is
-    /// legal and doesn't re-trigger rendering — memoizes the decoded image so
-    /// re-renders of the parent (every composer keystroke) don't re-decode
-    /// the full JPEG. The key compare is pointer-fast for the common case of
-    /// the same stored attachment string.
-    private final class DecodedImage {
-        var key = ""
-        var image: Image?
+    /// Process-wide decode cache, keyed by the Base64 payload. The
+    /// transcript's LazyVStack destroys and recreates rows while scrolling,
+    /// so a per-view memoizer re-decoded the full JPEG on the main thread on
+    /// every revisit of an image message.
+    @MainActor
+    private enum DecodedImageCache {
+        final class Box {
+            let image: Image?
+            init(_ image: Image?) { self.image = image }
+        }
+        static let shared: NSCache<NSString, Box> = {
+            let cache = NSCache<NSString, Box>()
+            cache.countLimit = 64
+            // Cost = Base64 length (~1.3x the JPEG, well under the bitmap).
+            cache.totalCostLimit = 64 << 20
+            return cache
+        }()
     }
-    @State private var cache = DecodedImage()
 
     private var image: Image? {
-        if cache.key != base64 {
-            cache.image = Data(base64Encoded: base64).flatMap { Image(imageData: $0) }
-            cache.key = base64
-        }
-        return cache.image
+        let key = base64 as NSString
+        if let hit = DecodedImageCache.shared.object(forKey: key) { return hit.image }
+        let decoded = Data(base64Encoded: base64).flatMap { Image(imageData: $0) }
+        DecodedImageCache.shared.setObject(.init(decoded), forKey: key, cost: base64.utf8.count)
+        return decoded
     }
 
     var body: some View {

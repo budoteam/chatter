@@ -127,7 +127,41 @@ struct ChatView: View {
         }
     }
 
+    /// Plain box, deliberately not observed (same trick as the sidebar's
+    /// GroupCache): memoizes the grouping so a streaming flush (~12 Hz)
+    /// doesn't re-sort and re-group the whole transcript per body evaluation.
+    private final class TranscriptCache {
+        var key = 0
+        var items: [TranscriptItem] = []
+    }
+    @State private var transcriptCache = TranscriptCache()
+
     private var transcriptItems: [TranscriptItem] {
+        let messages = session.orderedMessages
+        // Grouping depends on message identity and count, the live flag, and
+        // the newest message's growth (streaming content, tool calls being
+        // persisted). Completed messages are immutable, so this key is stable.
+        var hasher = Hasher()
+        hasher.combine(messages.count)
+        hasher.combine(env.isSending(session))
+        for message in messages { hasher.combine(message.id) }
+        if let last = messages.last {
+            hasher.combine(last.isStreaming)
+            hasher.combine(last.content.count)
+            hasher.combine(last.thinking?.count ?? 0)
+            hasher.combine(last.toolCallsJSON != nil)
+        }
+        let key = hasher.finalize()
+        if key != transcriptCache.key || transcriptCache.items.isEmpty {
+            transcriptCache.items = Self.groupTranscript(
+                messages: messages, live: env.isSending(session)
+            )
+            transcriptCache.key = key
+        }
+        return transcriptCache.items
+    }
+
+    private static func groupTranscript(messages: [Message], live: Bool) -> [TranscriptItem] {
         var items: [TranscriptItem] = []
         var steps: [Message] = []
 
@@ -137,7 +171,7 @@ struct ChatView: View {
             steps = []
         }
 
-        for message in session.orderedMessages {
+        for message in messages {
             switch message.role {
             case .system:
                 continue
@@ -158,7 +192,7 @@ struct ChatView: View {
                 }
             }
         }
-        flushSteps(live: env.isSending(session))
+        flushSteps(live: live)
         return items
     }
 

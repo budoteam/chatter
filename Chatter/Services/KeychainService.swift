@@ -141,6 +141,16 @@ enum KeychainService {
         setCache(nil)
     }
 
+    /// Drops the cached key so the next `loadAPIKey()` re-reads the keychain.
+    /// Called on HTTP 401: the item syncs through iCloud Keychain, so a key
+    /// changed or revoked on another device would otherwise stay invisible
+    /// until the app restarts.
+    static func invalidateCache() {
+        cacheLock.lock()
+        cacheValid = false
+        cacheLock.unlock()
+    }
+
     static var hasAPIKey: Bool {
         guard let key = loadAPIKey() else { return false }
         return !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty

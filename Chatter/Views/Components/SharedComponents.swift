@@ -10,7 +10,7 @@ enum SessionFactory {
     static func create(in context: ModelContext, agent: Agent?, models: [OllamaModel]) -> ChatSession {
         let session = ChatSession(agent: agent, modelId: defaultModel(agent: agent, models: models))
         context.insert(session)
-        try? context.save()
+        context.saveOrLog()
         return session
     }
 

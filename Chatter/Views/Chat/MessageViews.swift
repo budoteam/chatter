@@ -30,21 +30,12 @@ struct MessageActionBar: View {
     var onSelectText: (() -> Void)?
     let onDelete: () -> Void
 
-    @State private var copied = false
-
     var body: some View {
         HStack(spacing: 4) {
             if let onResend {
                 actionButton("arrow.clockwise", help: "Resend") { onResend() }
             }
-            actionButton(copied ? "checkmark" : "doc.on.doc", help: "Copy") {
-                onCopy()
-                copied = true
-                Task { @MainActor in
-                    try? await Task.sleep(for: .seconds(1.5))
-                    copied = false
-                }
-            }
+            CopyButton(help: "Copy") { onCopy() }
             if let onSelectText {
                 actionButton("text.viewfinder", help: "Select Text") { onSelectText() }
             }
@@ -64,6 +55,9 @@ struct MessageActionBar: View {
         }
         .buttonStyle(.plain)
         .help(help)
+        // Icon-only button: .help is no VoiceOver label (it would read the
+        // SF Symbol name out loud).
+        .accessibilityLabel(Text(help))
     }
 }
 

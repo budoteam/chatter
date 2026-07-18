@@ -96,7 +96,7 @@ struct RootView: View {
             agent.modelId = first
             changed = true
         }
-        if changed { try? context.save() }
+        if changed { context.saveOrLog() }
     }
 
     private func allServers() -> [MCPServerConfig] {
@@ -114,7 +114,7 @@ struct RootView: View {
         let stale = (try? context.fetch(descriptor)) ?? []
         guard !stale.isEmpty else { return }
         for message in stale { message.isStreaming = false }
-        try? context.save()
+        context.saveOrLog()
         AppLogger.data.info("Reset \(stale.count) stale isStreaming flag(s) at launch")
     }
 }

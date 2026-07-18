@@ -50,14 +50,97 @@ enum KnowledgeTransfer {
 
     // MARK: - Import
 
-    /// Walks an OKF bundle folder and creates (or merges into) a bundle.
+    /// One file found during the folder walk, in enumeration order, so the
+    /// apply phase rebuilds the report with the exact warning order the old
+    /// synchronous import produced.
+    enum ParsedEntry: Sendable {
+        /// Non-markdown file: counts as skipped.
+        case skipped(warning: String)
+        /// Unreadable as UTF-8: warning only, no skip count.
+        case unreadable(warning: String)
+        /// Parsed markdown; `conceptPath` is the relative path minus ".md".
+        case parsed(conceptPath: String, doc: OKFDocument)
+    }
+
+    /// Off-actor result of walking and parsing a bundle folder.
+    struct ParsedBundle: Sendable {
+        var folderName: String
+        var entries: [ParsedEntry]
+    }
+
+    /// Off-actor parse phase: folder walk, file I/O, and `OKFCodec.parse`
+    /// only — no SwiftData. `nonisolated async` so awaiting it from the main
+    /// actor runs the body on the cooperative pool.
+    nonisolated static func parseBundle(from folderURL: URL) async throws -> ParsedBundle {
+        try scanFolder(folderURL)
+    }
+
+    /// Main-actor apply phase: turns a parsed folder into bundle rows.
     /// Per the OKF spec, non-conformance is tolerated: files with missing or
     /// malformed frontmatter import with warnings instead of failing the run.
+    static func applyImport(
+        _ parsed: ParsedBundle,
+        into context: ModelContext,
+        mergingInto existing: KnowledgeBundle? = nil
+    ) -> ImportReport {
+        var report = ImportReport()
+        let bundle = existing ?? KnowledgeBundle(name: parsed.folderName)
+        report.bundleName = bundle.name
+
+        // Path-keyed lookup so merge-import stays linear instead of scanning
+        // the concepts array per file.
+        var conceptsByPath: [String: KnowledgeConcept] = [:]
+        for concept in bundle.concepts ?? [] {
+            conceptsByPath[concept.path] = concept
+        }
+
+        for entry in parsed.entries {
+            switch entry {
+            case .skipped(let warning):
+                report.skipped += 1
+                report.warnings.append(warning)
+            case .unreadable(let warning):
+                report.warnings.append(warning)
+            case .parsed(let conceptPath, let doc):
+                report.warnings.append(contentsOf: doc.warnings)
+
+                let concept: KnowledgeConcept
+                if let existing = conceptsByPath[conceptPath] {
+                    concept = existing
+                } else {
+                    concept = KnowledgeConcept(path: conceptPath)
+                    concept.bundle = bundle
+                    context.insert(concept)
+                    conceptsByPath[conceptPath] = concept
+                }
+                apply(doc, to: concept)
+                report.imported += 1
+            }
+        }
+
+        if existing == nil {
+            context.insert(bundle)
+        }
+        bundle.updatedAt = .now
+        context.saveOrLog()
+        return report
+    }
+
+    /// Walks an OKF bundle folder and creates (or merges into) a bundle.
+    /// Synchronous wrapper kept for callers that are not async (tests);
+    /// the UI uses `parseBundle` + `applyImport` to keep I/O off the main
+    /// actor.
     static func importBundle(
         from folderURL: URL,
         into context: ModelContext,
         mergingInto existing: KnowledgeBundle? = nil
     ) throws -> ImportReport {
+        try applyImport(scanFolder(folderURL), into: context, mergingInto: existing)
+    }
+
+    /// Synchronous worker shared by the async parse phase and the sync
+    /// wrapper. Holds the security-scoped access for the whole walk.
+    nonisolated private static func scanFolder(_ folderURL: URL) throws -> ParsedBundle {
         let scoped = folderURL.startAccessingSecurityScopedResource()
         defer { if scoped { folderURL.stopAccessingSecurityScopedResource() } }
 
@@ -69,17 +152,7 @@ enum KnowledgeTransfer {
             throw TransferError.notReadable(folderURL.lastPathComponent)
         }
 
-        var report = ImportReport()
-        let bundle = existing ?? KnowledgeBundle(name: folderURL.lastPathComponent)
-        report.bundleName = bundle.name
-
-        // Path-keyed lookup so merge-import stays linear instead of scanning
-        // the concepts array per file.
-        var conceptsByPath: [String: KnowledgeConcept] = [:]
-        for concept in bundle.concepts ?? [] {
-            conceptsByPath[concept.path] = concept
-        }
-
+        var parsed = ParsedBundle(folderName: folderURL.lastPathComponent, entries: [])
         let basePath = folderURL.standardizedFileURL.path
         for case let fileURL as URL in enumerator {
             guard (try? fileURL.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
@@ -90,38 +163,21 @@ enum KnowledgeTransfer {
             let relativePath = String(fullPath.dropFirst(basePath.count + 1))
 
             guard relativePath.hasSuffix(".md") else {
-                report.skipped += 1
-                report.warnings.append("\(relativePath): not markdown, skipped")
+                parsed.entries.append(.skipped(warning: "\(relativePath): not markdown, skipped"))
                 continue
             }
             guard let contents = try? String(contentsOf: fileURL, encoding: .utf8) else {
-                report.warnings.append("\(relativePath): unreadable as UTF-8, skipped")
+                parsed.entries.append(.unreadable(warning: "\(relativePath): unreadable as UTF-8, skipped"))
                 continue
             }
 
             let doc = OKFCodec.parse(path: relativePath, contents: contents)
-            report.warnings.append(contentsOf: doc.warnings)
-
-            let conceptPath = String(relativePath.dropLast(3))  // strip ".md"
-            let concept: KnowledgeConcept
-            if let existing = conceptsByPath[conceptPath] {
-                concept = existing
-            } else {
-                concept = KnowledgeConcept(path: conceptPath)
-                concept.bundle = bundle
-                context.insert(concept)
-                conceptsByPath[conceptPath] = concept
-            }
-            apply(doc, to: concept)
-            report.imported += 1
+            parsed.entries.append(.parsed(
+                conceptPath: String(relativePath.dropLast(3)),  // strip ".md"
+                doc: doc
+            ))
         }
-
-        if existing == nil {
-            context.insert(bundle)
-        }
-        bundle.updatedAt = .now
-        try? context.save()
-        return report
+        return parsed
     }
 
     /// Copies a parsed document's contents onto a concept row.

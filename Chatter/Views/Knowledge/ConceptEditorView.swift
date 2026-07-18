@@ -53,7 +53,7 @@ struct ConceptEditorView: View {
             commitPath()
             concept.updatedAt = .now
             concept.bundle?.updatedAt = .now
-            try? context.save()
+            context.saveOrLog()
         }
     }
 

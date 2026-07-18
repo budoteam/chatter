@@ -20,6 +20,9 @@ struct ComposerView: View {
     @FocusState private var focused: Bool
     @State private var photoItems: [PhotosPickerItem] = []
     @State private var supportsVision = false
+    /// Set when a picked image was refused because it would push the
+    /// message's attachments past the iCloud-sync size budget.
+    @State private var imageLimitHit = false
     #if os(iOS)
     /// Inserting "\n" for Shift+Return also fires the field's onSubmit
     /// (SwiftUI detects submit via newline insertion); this swallows that one.
@@ -30,6 +33,12 @@ struct ComposerView: View {
         VStack(alignment: .leading, spacing: 10) {
             if !viewModel.pendingImages.isEmpty {
                 thumbnailStrip
+            }
+            if imageLimitHit, !viewModel.pendingImages.isEmpty {
+                Text("Some images were skipped — attachments are limited to 700 KB per message so the chat keeps syncing via iCloud.")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 4)
             }
 
             TextField(placeholder, text: $viewModel.inputText, axis: .vertical)
@@ -164,14 +173,27 @@ struct ComposerView: View {
         .help(supportsVision
             ? "Attach images"
             : "This model doesn’t support images")
+        // Icon-only button: .help is no VoiceOver label.
+        .accessibilityLabel(Text(supportsVision
+            ? "Attach images"
+            : "This model doesn’t support images"))
     }
 
     private func loadPickedImages(_ items: [PhotosPickerItem]) async {
+        var skipped = false
         for item in items {
             guard let data = try? await item.loadTransferable(type: Data.self),
                   let base64 = ImageAttachmentProcessor.makeBase64JPEG(from: data) else { continue }
+            // CloudKit rejects records over ~1 MB of inline data — keep the
+            // message's attachments under budget instead of stalling sync.
+            let used = viewModel.pendingImages.reduce(0) { $0 + $1.base64.utf8.count }
+            guard used + base64.utf8.count <= ImageAttachment.maxBase64BytesPerMessage else {
+                skipped = true
+                continue
+            }
             viewModel.pendingImages.append(ImageAttachment(base64: base64))
         }
+        imageLimitHit = skipped
         photoItems = []
     }
 
@@ -264,6 +286,7 @@ struct ComposerView: View {
         .disabled(!viewModel.hasDraft && !isSending)
         .keyboardShortcut(.return, modifiers: .command)
         .animation(.easeInOut(duration: 0.15), value: isSending)
+        .accessibilityLabel(Text(isSending ? "Stop" : "Send"))
     }
 
     private var sendFill: AnyShapeStyle {

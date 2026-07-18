@@ -61,10 +61,14 @@ final class ChatViewModel {
             : ordered.last { $0.role == .user && $0.orderIndex < message.orderIndex }
         guard let anchor else { return }
 
-        for stale in ordered where stale.orderIndex > anchor.orderIndex {
-            context.delete(stale)
+        // Snapshot before deleting: if the regenerate turn fails (no API key,
+        // network down), the deleted history would otherwise be gone for good.
+        let stale = ordered.filter { $0.orderIndex > anchor.orderIndex }
+        let snapshots = stale.map(MessageSnapshot.init)
+        for message in stale {
+            context.delete(message)
         }
-        try? context.save()
+        context.saveOrLog()
 
         env.runTurn(for: session) { [weak self] in
             do {
@@ -72,6 +76,15 @@ final class ChatViewModel {
             } catch is CancellationError {
                 // User stopped — nothing to surface.
             } catch {
+                // The replacement failed: drop whatever the attempt left
+                // behind and restore the deleted history.
+                for leftover in session.orderedMessages where leftover.orderIndex > anchor.orderIndex {
+                    context.delete(leftover)
+                }
+                for snapshot in snapshots {
+                    snapshot.restore(into: context, session: session)
+                }
+                context.saveOrLog()
                 self?.errorMessage = error.localizedDescription
             }
             Self.finishStreaming(session: session, context: context)
@@ -81,7 +94,7 @@ final class ChatViewModel {
     /// Deletes exactly this one message.
     func delete(_ message: Message, context: ModelContext) {
         context.delete(message)
-        try? context.save()
+        context.saveOrLog()
     }
 
     /// Ensure no message is left flagged as streaming after stop/error.
@@ -89,6 +102,43 @@ final class ChatViewModel {
         for message in session.orderedMessages where message.isStreaming {
             message.isStreaming = false
         }
-        try? context.save()
+        context.saveOrLog()
+    }
+}
+
+/// Value copy of a message, so a failed resend/regenerate turn can put the
+/// deleted history back instead of losing it for good.
+private struct MessageSnapshot {
+    let roleRaw: String
+    let content: String
+    let orderIndex: Int
+    let createdAt: Date
+    let toolCallsJSON: String?
+    let attachmentsJSON: String?
+    let toolName: String?
+    let thinking: String?
+
+    init(_ message: Message) {
+        roleRaw = message.roleRaw
+        content = message.content
+        orderIndex = message.orderIndex
+        createdAt = message.createdAt
+        toolCallsJSON = message.toolCallsJSON
+        attachmentsJSON = message.attachmentsJSON
+        toolName = message.toolName
+        thinking = message.thinking
+    }
+
+    func restore(into context: ModelContext, session: ChatSession) {
+        let message = Message(
+            role: MessageRole(rawValue: roleRaw) ?? .user,
+            content: content, orderIndex: orderIndex, toolName: toolName
+        )
+        message.createdAt = createdAt
+        message.toolCallsJSON = toolCallsJSON
+        message.attachmentsJSON = attachmentsJSON
+        message.thinking = thinking
+        message.session = session
+        context.insert(message)
     }
 }
