@@ -161,20 +161,67 @@ struct ThoughtsDisclosure: View {
             .buttonStyle(.plain)
 
             if isOpen {
-                MarkdownText(text: text)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .padding(.leading, 12)
-                    .overlay(alignment: .leading) {
-                        RoundedRectangle(cornerRadius: 1.5)
-                            .fill(Theme.separator)
-                            .frame(width: 3)
+                Group {
+                    if isThinking {
+                        LiveThinkingTrace(text: text)
+                    } else {
+                        // Capped even when deliberately opened: huge traces
+                        // must not shove the whole chat around either.
+                        ScrollView {
+                            MarkdownText(text: text)
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .frame(maxHeight: 400)
                     }
+                }
+                .padding(.leading, 12)
+                .overlay(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 1.5)
+                        .fill(Theme.separator)
+                        .frame(width: 3)
+                }
             }
         }
         // Matches scrollToBottom's curve so the auto-collapse (isThinking →
         // false) and the re-pin scroll compose instead of jumping.
         .animation(.easeOut(duration: 0.2), value: isOpen)
+    }
+}
+
+/// The live reasoning trace while the model thinks: a fixed-height window
+/// that auto-follows the tail of the trace. The growing text scrolls by
+/// inside the box instead of pushing the whole chat viewport down on every
+/// streaming flush; the box itself stays scrollable by hand.
+private struct LiveThinkingTrace: View {
+    let text: String
+    var height: CGFloat = 140
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(spacing: 0) {
+                    MarkdownText(text: text)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Color.clear.frame(height: 1).id("tail")
+                }
+            }
+            .onAppear { pinToTail(proxy) }
+            .onChange(of: text.count) { pinToTail(proxy) }
+        }
+        .frame(height: height)
+    }
+
+    private func pinToTail(_ proxy: ScrollViewProxy) {
+        // disablesAnimations, not just "no withAnimation" — same reason as
+        // ChatView.scrollToBottom: the scroll must not inherit a transaction
+        // that is already in flight (e.g. the disclosure's own collapse).
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) { proxy.scrollTo("tail", anchor: .bottom) }
     }
 }
 
