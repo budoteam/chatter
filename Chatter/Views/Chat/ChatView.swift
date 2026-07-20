@@ -89,8 +89,12 @@ struct ChatView: View {
                 // collapse animations the layout loop can stop converging
                 // entirely (100s+ main-thread hang, see reports 2026-07-16).
                 .onChange(of: lastMessageFingerprint) { scrollToBottom(proxy, animated: false) }
-                .onChange(of: (session.messages ?? []).count) { scrollToBottom(proxy) }
-                .onChange(of: env.isSending(session)) { scrollToBottom(proxy) }
+                // Unanimated like the flush re-pin above: these fire during
+                // tool loops (one insert per tool message), and an animated
+                // scroll here makes every simultaneous row insertion play a
+                // transition — the tool cards flash, flicker, and overlap.
+                .onChange(of: (session.messages ?? []).count) { scrollToBottom(proxy, animated: false) }
+                .onChange(of: env.isSending(session)) { scrollToBottom(proxy, animated: false) }
                 .onAppear { scrollToBottom(proxy, animated: false) }
             }
         }
