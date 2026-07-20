@@ -58,6 +58,17 @@ final class AppEnvironment {
         self.mcp = mcp
         self.knowledge = knowledge
         self.engine = ChatEngine(ollama: ollama, mcp: mcp, knowledge: knowledge)
+        #if os(iOS) || os(watchOS)
+        // iCloud Keychain doesn't reliably sync to watchOS; the watch pulls
+        // the API key from the paired iPhone over WatchConnectivity instead.
+        WatchKeySync.shared.activate()
+        #if os(watchOS)
+        WatchKeySync.shared.onKeyReceived = { [weak self] in
+            self?.refreshAPIKeyState()
+            Task { await self?.refreshModels() }
+        }
+        #endif
+        #endif
     }
 
     func requestNewSession() { newSessionRequestID = UUID() }

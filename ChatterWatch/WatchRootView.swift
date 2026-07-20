@@ -20,7 +20,7 @@ struct WatchRootView: View {
         NavigationStack {
             List {
                 if !env.hasAPIKey {
-                    Label("Waiting for the Ollama API key to sync via iCloud Keychain…", systemImage: "key")
+                    Label("Requesting the Ollama API key from your iPhone…", systemImage: "key")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -72,6 +72,7 @@ struct WatchRootView: View {
         }
         .task {
             env.refreshAPIKeyState()
+            WatchKeySync.shared.requestKeyIfNeeded()
             await env.refreshModels()
             await env.mcp.syncConnections(configs: mcpServers.filter(\.enabled))
         }

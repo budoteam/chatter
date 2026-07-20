@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Chatter — a multiplatform (iOS 17+ / macOS 14+ / watchOS 10+) SwiftUI LLM chat app backed by Ollama Cloud, with MCP tool support and user-defined Agents. One shared codebase: app target `Chatter` (iOS+macOS), watch target `ChatterWatch`, test target. The only package dependency is the MCP Swift SDK.
 
-The watchOS app (`ChatterWatch/`, own views, watchOS 10+) is a standalone chat client — read history, reply via dictation — that shares models, services, `ChatEngine`, `AppEnvironment`, and `ChatViewModel` with the main app (explicit source paths in `project.yml`, excluding the PDF importer and `ImageAttachmentProcessor`, which don't exist on watchOS). It syncs everything (agents, MCP configs, sessions, API key via iCloud Keychain) and intentionally has no settings UI.
+The watchOS app (`ChatterWatch/`, own views, watchOS 10+) is a standalone chat client — read history, reply via dictation — that shares models, services, `ChatEngine`, `AppEnvironment`, and `ChatViewModel` with the main app (explicit source paths in `project.yml`, excluding the PDF importer and `ImageAttachmentProcessor`, which don't exist on watchOS). It syncs everything (agents, MCP configs, sessions via CloudKit; the API key from the paired iPhone via WatchConnectivity/`WatchKeySync` — iCloud Keychain doesn't reliably sync to watchOS) and intentionally has no settings UI.
 
 ## Project generation & builds
 
