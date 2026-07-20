@@ -13,7 +13,7 @@ packages:
 
 settings:
   base:
-    MARKETING_VERSION: "1.7"
+    MARKETING_VERSION: "1.8"
     # Build number scheme: <yyyymmdd>.<counter that day>
     CURRENT_PROJECT_VERSION: "20260718.1"
     SWIFT_VERSION: "5.0"
@@ -33,6 +33,18 @@ schemes:
       config: Debug
       targets:
         - ChatterTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
+  ChatterWatch:
+    build:
+      targets:
+        ChatterWatch: all
+    run:
+      config: Debug
     profile:
       config: Release
     analyze:
@@ -66,6 +78,11 @@ targets:
     dependencies:
       - package: MCP
         product: MCP
+      # Embeds the watchOS app into the iOS app (Watch companion). The
+      # destination filter keeps macOS builds/tests from building (and
+      # trying to sign) the watch target.
+      - target: ChatterWatch
+        destinationFilters: [iOS]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: team.budo.chatter
@@ -93,6 +110,54 @@ targets:
           # TestFlight/App Store requires the sandbox on macOS. Debug stays
           # unsandboxed so stdio MCP servers keep working during development.
           "CODE_SIGN_ENTITLEMENTS[sdk=macosx*]": Chatter/Chatter-macOS-Release.entitlements
+
+  ChatterWatch:
+    type: application
+    platform: watchOS
+    deploymentTarget: "10.0"
+    sources:
+      - path: ChatterWatch
+        excludes:
+          - "Info.plist"
+      # Shared with the iOS/macOS app: models, services, engine, view model.
+      - path: Chatter/Models
+      - path: Chatter/Persistence.swift
+      - path: Chatter/AppEnvironment.swift
+      - path: Chatter/ViewModels/ChatViewModel.swift
+      - path: Chatter/Services
+        excludes:
+          # PDFKit does not exist on watchOS; PDF import stays iOS/macOS-only.
+          - "Knowledge/PDFKnowledgeImporter.swift"
+          - "Knowledge/PDFImportJob.swift"
+          # Photo attachments are iOS/macOS-only for now.
+          - "ImageAttachmentProcessor.swift"
+      - path: Chatter/DesignSystem/Theme.swift
+      - path: Chatter/Assets.xcassets
+      - path: Chatter/AppIcon.icon
+    info:
+      path: ChatterWatch/Info.plist
+      properties:
+        # Single-target watchOS app (no WatchKit extension).
+        WKApplication: true
+        WKCompanionAppBundleIdentifier: team.budo.chatter
+        CFBundleDisplayName: Chatter
+        # Same ATS exception as the main app: self-hosted MCP over plain HTTP.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        ITSAppUsesNonExemptEncryption: false
+    dependencies:
+      - package: MCP
+        product: MCP
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: team.budo.chatter.watch
+        PRODUCT_NAME: Chatter
+        CODE_SIGN_ENTITLEMENTS: ChatterWatch/Chatter-watchOS.entitlements
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Chatter
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_PREVIEWS: YES
+        SWIFT_APPROACHABLE_CONCURRENCY: YES
 
   ChatterTests:
     type: bundle.unit-test

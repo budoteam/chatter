@@ -1,7 +1,7 @@
 import SwiftUI
 #if canImport(UIKit)
 import UIKit
-#else
+#elseif canImport(AppKit)
 import AppKit
 #endif
 
@@ -76,7 +76,10 @@ extension Color {
 
     /// A color that resolves to `light`/`dark` hex values per the active appearance.
     static func dynamic(light: String, dark: String) -> Color {
-        #if canImport(UIKit)
+        #if os(watchOS)
+        // watchOS has no light appearance — the interface is always dark.
+        return Color(hex: dark)
+        #elseif canImport(UIKit)
         return Color(uiColor: UIColor { traits in
             UIColor(Color(hex: traits.userInterfaceStyle == .dark ? dark : light))
         })
@@ -90,6 +93,15 @@ extension Color {
 
     /// Hex string (RRGGBB) for persistence.
     var hexString: String {
+        #if os(watchOS)
+        // Neither UIColor nor NSColor exists on watchOS; `resolve(in:)`
+        // (watchOS 10+) is the cross-platform way to read components.
+        let resolved = resolve(in: EnvironmentValues())
+        return String(
+            format: "%02X%02X%02X",
+            Int(resolved.red * 255), Int(resolved.green * 255), Int(resolved.blue * 255)
+        )
+        #else
         #if canImport(UIKit)
         typealias NativeColor = UIColor
         #else
@@ -102,5 +114,6 @@ extension Color {
         NativeColor(self).usingColorSpace(.sRGB)?.getRed(&r, green: &g, blue: &b, alpha: &a)
         #endif
         return String(format: "%02X%02X%02X", Int(r * 255), Int(g * 255), Int(b * 255))
+        #endif
     }
 }

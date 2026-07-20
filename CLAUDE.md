@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Chatter — a multiplatform (iOS 17+ / macOS 14+) SwiftUI LLM chat app backed by Ollama Cloud, with MCP tool support and user-defined Agents. Single app target, one shared codebase for both platforms. The only package dependency is the MCP Swift SDK.
+Chatter — a multiplatform (iOS 17+ / macOS 14+ / watchOS 10+) SwiftUI LLM chat app backed by Ollama Cloud, with MCP tool support and user-defined Agents. One shared codebase: app target `Chatter` (iOS+macOS), watch target `ChatterWatch`, test target. The only package dependency is the MCP Swift SDK.
+
+The watchOS app (`ChatterWatch/`, own views, watchOS 10+) is a standalone chat client — read history, reply via dictation — that shares models, services, `ChatEngine`, `AppEnvironment`, and `ChatViewModel` with the main app (explicit source paths in `project.yml`, excluding the PDF importer and `ImageAttachmentProcessor`, which don't exist on watchOS). It syncs everything (agents, MCP configs, sessions, API key via iCloud Keychain) and intentionally has no settings UI.
 
 ## Project generation & builds
 
@@ -23,6 +25,10 @@ xcodebuild -project Chatter.xcodeproj -scheme Chatter \
 
 # Build for macOS
 xcodebuild -project Chatter.xcodeproj -scheme Chatter -destination 'platform=macOS' build
+
+# Build for watchOS (compiling only needs the generic simulator destination)
+xcodebuild -project Chatter.xcodeproj -scheme ChatterWatch \
+  -destination 'generic/platform=watchOS Simulator' build
 ```
 
 Tests live in `ChatterTests` (codecs, transfer, tool providers, plus `ChatEngineTests` driving the tool loop against the protocol mocks): `xcodebuild ... -destination 'platform=macOS' test`. Signing is automatic with the team from `project.yml`; entitlements are per-platform files (`Chatter/Chatter-iOS.entitlements`, `Chatter/Chatter-macOS.entitlements` — the APNs entitlement key differs between the platforms, and only macOS carries the sandbox key). TestFlight release: bump `CURRENT_PROJECT_VERSION` in `project.yml`, `./generate.sh`, archive with `xcodebuild ... archive -allowProvisioningUpdates`, upload via Xcode Organizer. **If the release adds or changes any `@Model`, deploy the CloudKit schema to Production first** (see below).

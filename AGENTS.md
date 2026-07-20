@@ -2,11 +2,11 @@
 
 ## Project Overview
 
-Chatter is a multiplatform (iOS 17+ / iPadOS / macOS 14+) SwiftUI LLM chat app powered by Ollama Cloud, with MCP (Model Context Protocol) tool support, user-defined Agents, a knowledge base (OKF), skills, and memory. Each Agent configures a model, system prompt, temperature, MCP servers, and knowledge bundles. Session history syncs across devices via CloudKit. UI is inspired by Google Gemini.
+Chatter is a multiplatform (iOS 17+ / iPadOS / macOS 14+ / watchOS 10+) SwiftUI LLM chat app powered by Ollama Cloud, with MCP (Model Context Protocol) tool support, user-defined Agents, a knowledge base (OKF), skills, and memory. Each Agent configures a model, system prompt, temperature, MCP servers, and knowledge bundles. Session history syncs across devices via CloudKit. UI is inspired by Google Gemini.
 
-- Bundle ID: `team.budo.chatter`
+- Bundle ID: `team.budo.chatter` (watch app: `team.budo.chatter.watch`)
 - CloudKit container: `iCloud.team.budo.chatter`
-- Single shared codebase, one app target + one test target; only third-party dependency is the MCP Swift SDK (`0.11.0+`).
+- Shared codebase: app target `Chatter` (iOS/macOS) + watch target `ChatterWatch` + one test target; only third-party dependency is the MCP Swift SDK (`0.11.0+`).
 - `CLAUDE.md` covers the same ground from a Claude Code angle; keep both in sync when updating.
 
 ## Architecture & Data Flow
@@ -39,6 +39,7 @@ SwiftUI Views  →  ViewModels (@Observable)  →  ChatEngine (orchestrator)
 - `Chatter/Models/` — SwiftData `@Model` objects: `Agent`, `ChatSession`, `Message`, `MCPServerConfig`, `KnowledgeBundle`, `KnowledgeConcept`, `Skill`, `MemoryEntry`.
 - `Chatter/Services/` — `ChatEngine`, `OllamaService`, `MCPConnectionManager`, `Knowledge/` (OKFCodec, KnowledgeTransfer, KnowledgeToolProvider, PDFKnowledgeImporter, PDFImportJob), `SkillCodec`/`SkillTransfer`/`SkillToolProvider`, `MemoryToolProvider`, `WebToolProvider`, `KeychainService`, `CloudSyncMonitor`, `AppLogger`, `LegacySSEClientTransport`, plus `Protocols/`.
 - `Chatter/Views/` — `RootView` + `Sidebar/`, `Chat/`, `Agents/`, `Knowledge/`, `Skills/`, `Settings/`, `Components/`. Platform diffs inline via `#if os(macOS)`.
+- `ChatterWatch/` — watchOS app (own `@main` + views; session list, chat, dictation composer). Shares `Chatter/Models`, `Chatter/Services` (minus PDF importer + `ImageAttachmentProcessor`), `Persistence.swift`, `AppEnvironment.swift`, `ChatViewModel.swift`, `DesignSystem/Theme.swift` via explicit source paths in `project.yml` — no settings UI: agents/MCP/sessions sync via CloudKit, the API key via iCloud Keychain.
 - `ChatterTests/` — XCTest bundle: codec round-trips (OKF, Skill), transfer, tool providers, PDF importer.
 - `ci_scripts/ci_post_clone.sh` — Xcode Cloud post-clone (see CI below).
 - `project.yml` — XcodeGen spec, **source of truth** for the Xcode project.
@@ -53,6 +54,7 @@ No `package.json` / npm / Bun. Pure Swift/Xcode, XcodeGen-managed.
 | Generate Xcode project (after editing `project.yml` or adding files) | `./generate.sh` (requires `brew install xcodegen`) |
 | Build (iOS Simulator) | `xcodebuild -project Chatter.xcodeproj -scheme Chatter -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build` |
 | Build (macOS) | `xcodebuild -project Chatter.xcodeproj -scheme Chatter -destination 'platform=macOS' build` |
+| Build (watchOS) | `xcodebuild -project Chatter.xcodeproj -scheme ChatterWatch -destination 'generic/platform=watchOS Simulator' build` |
 | Test (macOS) | `xcodebuild -project Chatter.xcodeproj -scheme Chatter -destination 'platform=macOS' test` |
 | Single test class | append `-only-testing:ChatterTests/OKFCodecTests` |
 | Open in Xcode | `open Chatter.xcodeproj` |
