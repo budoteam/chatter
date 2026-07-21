@@ -11,6 +11,8 @@ struct WatchChatView: View {
 
     let session: ChatSession
     @State private var viewModel = ChatViewModel()
+    /// Bumped after sending to force-recreate the TextField (see `send()`).
+    @State private var composerID = UUID()
 
     /// Tool calls and empty assistant stubs stay invisible — on the watch the
     /// answer is what matters.
@@ -64,6 +66,7 @@ struct WatchChatView: View {
         HStack(spacing: 6) {
             TextField("Message", text: $viewModel.inputText)
                 .onSubmit(send)
+                .id(composerID)
             if env.isSending(session) {
                 Button(role: .destructive) {
                     viewModel.stop(env: env, session: session)
@@ -84,6 +87,12 @@ struct WatchChatView: View {
 
     private func send() {
         viewModel.send(env: env, session: session, agent: session.agent, context: context)
+        // watchOS commits the dictated text into the binding *after* onSubmit
+        // already ran — overwriting the clear in ChatViewModel.send and/or
+        // leaving the field displaying the committed text. Recreate the
+        // field and re-clear on the next runloop turn to cover both orders.
+        composerID = UUID()
+        Task { @MainActor in viewModel.inputText = "" }
     }
 
     // MARK: - Bubbles
