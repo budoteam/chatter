@@ -13,7 +13,7 @@ final class OrderIndexTests: XCTestCase {
 
     private func makeContext() throws -> ModelContext {
         let container = try ModelContainer(
-            for: ChatSession.self, Message.self,
+            for: ChatSession.self, Message.self, Artifact.self,
             // In the hosted test process the `.automatic` default would hook
             // the in-memory store into the app's CloudKit mirroring (crash on
             // save: "No eligible connection available").

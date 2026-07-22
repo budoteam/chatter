@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 import SwiftUI
 
 /// Which screen the detail (main) column shows. `.chat` falls back to the
@@ -18,6 +19,7 @@ final class AppEnvironment {
     let ollama: OllamaServiceProtocol
     let mcp: MCPConnectionManager
     let knowledge: KnowledgeToolProvider
+    let artifacts: ArtifactToolProvider
     let engine: ChatEngine
     /// Watches CloudKit sync events for the Settings status section.
     let sync = CloudSyncMonitor()
@@ -33,6 +35,10 @@ final class AppEnvironment {
     var modelCapabilities: [String: Set<String>] = [:]
     /// Text to pre-fill the composer of the next opened chat (welcome chips).
     var pendingPrompt: String?
+
+    /// Artifact shown in the side panel (macOS) or sheet (iOS); set by
+    /// tapping an artifact pill in the chat, cleared by closing the panel.
+    var openArtifactID: PersistentIdentifier?
 
     /// Bumped by the macOS "New Chat" menu command; observed by `RootView`.
     private(set) var newSessionRequestID = UUID()
@@ -54,10 +60,12 @@ final class AppEnvironment {
         let ollama = OllamaService()
         let mcp = MCPConnectionManager()
         let knowledge = KnowledgeToolProvider()
+        let artifacts = ArtifactToolProvider()
         self.ollama = ollama
         self.mcp = mcp
         self.knowledge = knowledge
-        self.engine = ChatEngine(ollama: ollama, mcp: mcp, knowledge: knowledge)
+        self.artifacts = artifacts
+        self.engine = ChatEngine(ollama: ollama, mcp: mcp, knowledge: knowledge, artifacts: artifacts)
         #if os(iOS) || os(watchOS)
         // iCloud Keychain doesn't reliably sync to watchOS; the watch pulls
         // the API key from the paired iPhone over WatchConnectivity instead.

@@ -18,6 +18,9 @@ final class ChatSession {
     @Relationship(deleteRule: .cascade, inverse: \Message.session)
     var messages: [Message]? = []
 
+    @Relationship(deleteRule: .cascade, inverse: \Artifact.session)
+    var artifacts: [Artifact]? = []
+
     init(title: String = "New Chat", agent: Agent? = nil, modelId: String = "") {
         self.id = UUID()
         self.title = title

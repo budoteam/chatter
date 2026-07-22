@@ -24,6 +24,7 @@ enum Persistence {
         Agent.self,
         ChatSession.self,
         Message.self,
+        Artifact.self,
         MCPServerConfig.self,
         KnowledgeBundle.self,
         KnowledgeConcept.self,

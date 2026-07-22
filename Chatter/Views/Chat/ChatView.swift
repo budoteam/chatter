@@ -52,7 +52,38 @@ struct ChatView: View {
         .sheet(item: $selectingMessage) { message in
             SelectableTextSheet(text: message.content)
         }
+        .sheet(isPresented: artifactPresented) {
+            NavigationStack { artifactPane }
+                .presentationDetents([.large])
+        }
+        #else
+        .inspector(isPresented: artifactPresented) {
+            artifactPane
+                .inspectorColumnWidth(min: 360, ideal: 420, max: 600)
+        }
         #endif
+    }
+
+    /// Driven by `env.openArtifactID` (set by artifact pills in the chat);
+    /// closing the panel/sheet clears it again.
+    private var artifactPresented: Binding<Bool> {
+        Binding(
+            get: { env.openArtifactID != nil },
+            set: { if !$0 { env.openArtifactID = nil } }
+        )
+    }
+
+    @ViewBuilder
+    private var artifactPane: some View {
+        if let id = env.openArtifactID, let artifact = context.model(for: id) as? Artifact {
+            ArtifactPaneView(artifact: artifact)
+        } else {
+            ContentUnavailableView(
+                "Artifact Unavailable",
+                systemImage: "doc.questionmark",
+                description: Text("The artifact was deleted.")
+            )
+        }
     }
 
     @ViewBuilder

@@ -13,7 +13,7 @@ final class ChatEngineTests: XCTestCase {
 
     private func makeContext() throws -> ModelContext {
         let container = try ModelContainer(
-            for: Agent.self, ChatSession.self, Message.self,
+            for: Agent.self, ChatSession.self, Message.self, Artifact.self,
             // In the hosted test process the `.automatic` default would hook
             // the in-memory store into the app's CloudKit mirroring (crash on
             // save: "No eligible connection available").
@@ -131,7 +131,7 @@ final class ChatEngineTests: XCTestCase {
         }
         let mcp = MockMCPClient()
         mcp.result = "echo: hi"
-        let engine = ChatEngine(ollama: ollama, mcp: mcp, knowledge: FakeKnowledge())
+        let engine = ChatEngine(ollama: ollama, mcp: mcp, knowledge: FakeKnowledge(), artifacts: ArtifactToolProvider())
 
         try await engine.send(text: "ping", session: session, agent: agent, context: context)
 
@@ -174,7 +174,7 @@ final class ChatEngineTests: XCTestCase {
         }
         let mcp = MockMCPClient()
         let knowledge = FakeKnowledge()
-        let engine = ChatEngine(ollama: ollama, mcp: mcp, knowledge: knowledge)
+        let engine = ChatEngine(ollama: ollama, mcp: mcp, knowledge: knowledge, artifacts: ArtifactToolProvider())
 
         try await engine.send(text: "ping", session: session, agent: agent, context: context)
 
@@ -195,7 +195,7 @@ final class ChatEngineTests: XCTestCase {
                 continuation.yield(.delta("Teilwort"))
             }
         }
-        let engine = ChatEngine(ollama: ollama, mcp: MockMCPClient(), knowledge: FakeKnowledge())
+        let engine = ChatEngine(ollama: ollama, mcp: MockMCPClient(), knowledge: FakeKnowledge(), artifacts: ArtifactToolProvider())
 
         let turn = Task { @MainActor in
             do {
@@ -239,13 +239,14 @@ final class ChatEngineTests: XCTestCase {
             serverID: serverID,
             serverName: "srv"
         )]
-        let engine = ChatEngine(ollama: ollama, mcp: mcp, knowledge: FakeKnowledge())
+        let engine = ChatEngine(ollama: ollama, mcp: mcp, knowledge: FakeKnowledge(), artifacts: ArtifactToolProvider())
 
         try await engine.send(text: "ping", session: session, agent: agent, context: context)
 
         XCTAssertEqual(mcp.calls.count, 42, "one tool execution per budgeted round")
         XCTAssertEqual(ollama.callCount, 43, "42 tool rounds + 1 final round")
-        XCTAssertTrue(ollama.toolsPerCall.prefix(42).allSatisfy { $0 == 1 })
+        // 2 tools per round: the MCP loop tool + the built-in artifact tool.
+        XCTAssertTrue(ollama.toolsPerCall.prefix(42).allSatisfy { $0 == 2 })
         XCTAssertEqual(ollama.toolsPerCall.last, 0, "final round must offer no tools")
         XCTAssertEqual(session.orderedMessages.last?.content, "Fertig.")
     }

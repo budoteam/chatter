@@ -12,14 +12,16 @@ final class ChatEngine {
     private let mcp: MCPClientProtocol
     private let knowledge: KnowledgeToolProviding
     private let web: WebToolProvider
+    private let artifacts: ArtifactToolProvider
     private let memory = MemoryToolProvider()
     private let skills = SkillToolProvider()
     private let maxToolIterations = 42
 
-    init(ollama: OllamaServiceProtocol, mcp: MCPClientProtocol, knowledge: KnowledgeToolProviding) {
+    init(ollama: OllamaServiceProtocol, mcp: MCPClientProtocol, knowledge: KnowledgeToolProviding, artifacts: ArtifactToolProvider) {
         self.ollama = ollama
         self.mcp = mcp
         self.knowledge = knowledge
+        self.artifacts = artifacts
         self.web = WebToolProvider(ollama: ollama)
     }
 
@@ -113,6 +115,12 @@ final class ChatEngine {
         let skillToolNames = Set(skillTools.map(\.function.name))
         tools += skillTools
 
+        // Built-in artifact tool: file output (CSV / markdown / code) that
+        // renders in the side panel instead of flooding the chat stream.
+        let artifactTools = artifacts.tools()
+        let artifactToolNames = Set(artifactTools.map(\.function.name))
+        tools += artifactTools
+
         // The knowledge overview is stable within one send; compute it once
         // instead of per tool-loop iteration (it fetches and walks bundles).
         // Same for the skill index and the memory listing — a mid-turn save
@@ -148,7 +156,8 @@ final class ChatEngine {
                         for: agent,
                         knowledgeSection: knowledgeSection,
                         skillsSection: skillsSection,
-                        memorySection: memorySection
+                        memorySection: memorySection,
+                        artifactSection: ArtifactToolProvider.systemPromptSection
                     )
                 )
             ]
@@ -231,9 +240,10 @@ final class ChatEngine {
             }
 
             // Persist the requested calls on the assistant turn, then run them.
-            assistant.toolCalls = toolCalls.map {
+            let persistedCalls = toolCalls.map {
                 ToolCall(name: $0.function.name, argumentsJSON: $0.function.arguments.jsonString)
             }
+            assistant.toolCalls = persistedCalls
             context.saveOrLog()
 
             /// Stop mid-execution answers every call the model is still
@@ -282,6 +292,16 @@ final class ChatEngine {
                             namespacedName: name, argumentsJSON: argsJSON,
                             agent: agent, context: context
                         )
+                    } else if artifactToolNames.contains(name) {
+                        // `answered` indexes the current call in the persisted
+                        // array, linking the artifact to its ToolCall for the
+                        // chat pill.
+                        result = try artifacts.call(
+                            name: name, argumentsJSON: argsJSON,
+                            session: session,
+                            sourceToolCallID: persistedCalls[answered].id,
+                            context: context
+                        )
                     } else {
                         result = try await mcp.callTool(namespacedName: name, argumentsJSON: argsJSON)
                     }
@@ -319,7 +339,8 @@ final class ChatEngine {
         for agent: Agent?,
         knowledgeSection: String?,
         skillsSection: String?,
-        memorySection: String?
+        memorySection: String?,
+        artifactSection: String?
     ) -> String {
         let timestamp = "Current Date and Time: \(timestampFormatter.string(from: Date()))"
         var parts: [String] = []
@@ -328,6 +349,7 @@ final class ChatEngine {
         if let knowledgeSection { parts.append(knowledgeSection) }
         if let skillsSection { parts.append(skillsSection) }
         if let memorySection { parts.append(memorySection) }
+        if let artifactSection { parts.append(artifactSection) }
         parts.append(timestamp)
         return parts.joined(separator: "\n\n")
     }

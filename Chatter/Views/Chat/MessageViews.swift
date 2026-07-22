@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 #if os(macOS)
 import AppKit
 #else
@@ -240,6 +241,15 @@ struct ActivityGroupView: View {
         steps.filter { $0.role == .tool }.count
     }
 
+    /// ToolCall ids of `artifact__create` calls across all steps — their
+    /// pills stay visible even after the group collapses, so the generated
+    /// file remains one tap away.
+    private var artifactCallIDs: [String] {
+        steps.flatMap { $0.toolCalls }
+            .filter { $0.name == ArtifactToolProvider.createToolName }
+            .map(\.id)
+    }
+
     private var isOpen: Bool { expanded || live }
 
     var body: some View {
@@ -269,6 +279,15 @@ struct ActivityGroupView: View {
             if isOpen {
                 VStack(alignment: .leading, spacing: 12) {
                     ForEach(steps) { StepView(message: $0) }
+                }
+                .padding(.top, 12)
+            }
+
+            if !artifactCallIDs.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(artifactCallIDs, id: \.self) { callID in
+                        ArtifactPillLoader(sourceToolCallID: callID)
+                    }
                 }
                 .padding(.top, 12)
             }
@@ -316,6 +335,67 @@ private struct StepView: View {
     }
 }
 
+// MARK: - Artifact pill (opens the side panel / sheet)
+
+/// Clickable file chip shown for every `artifact__create` call; tapping it
+/// opens the artifact in the inspector (macOS) or a sheet (iOS).
+struct ArtifactPill: View {
+    let artifact: Artifact
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 8) {
+                Image(systemName: artifact.kind.iconName)
+                    .font(.caption)
+                    .foregroundStyle(Theme.accent)
+                Text(artifact.name)
+                    .font(.caption.weight(.medium))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(sizeString)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+                Image(systemName: "arrow.up.forward.square")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(10)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var sizeString: String {
+        String(format: "%.1f KB", Double(artifact.content.utf8.count) / 1000)
+    }
+}
+
+/// Resolves the artifact belonging to one `artifact__create` ToolCall and
+/// renders its pill. A loader (rather than passing the artifact down) keeps
+/// the pill live across CloudKit merges and replace-updates.
+private struct ArtifactPillLoader: View {
+    @Environment(AppEnvironment.self) private var env
+    @Query private var artifacts: [Artifact]
+
+    init(sourceToolCallID: String) {
+        _artifacts = Query(
+            filter: #Predicate<Artifact> { $0.sourceToolCallID == sourceToolCallID },
+            sort: \.createdAt
+        )
+    }
+
+    var body: some View {
+        ForEach(artifacts) { artifact in
+            ArtifactPill(artifact: artifact) {
+                env.openArtifactID = artifact.persistentModelID
+            }
+        }
+    }
+}
+
 // MARK: - Tool call (requested by the model)
 
 struct ToolCallCard: View {
@@ -353,7 +433,33 @@ struct ToolResultCard: View {
     let message: Message
     @State private var expanded = false
 
+    /// `artifact__create` results are just a confirmation line — the file
+    /// itself is shown via the pill and panel, so the raw result box (and
+    /// its expand toggle) would only duplicate it.
+    private var isArtifactResult: Bool {
+        message.toolName == ArtifactToolProvider.createToolName
+    }
+
     var body: some View {
+        if isArtifactResult {
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+                Text(message.content)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                Spacer(minLength: 0)
+            }
+            .padding(10)
+            .background(Theme.surface.opacity(0.6), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        } else {
+            regularBody
+        }
+    }
+
+    private var regularBody: some View {
         VStack(alignment: .leading, spacing: 6) {
             Button { withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() } } label: {
                 HStack(spacing: 8) {
