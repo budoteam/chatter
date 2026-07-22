@@ -89,7 +89,7 @@ struct AgentEditorView: View {
                 }
                 if env.models.isEmpty {
                     Text("No models loaded. Add your API key in Settings.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(Theme.Typography.font(.caption)).foregroundStyle(.secondary)
                 }
                 VStack(alignment: .leading) {
                     HStack {
@@ -142,14 +142,14 @@ struct AgentEditorView: View {
             Section("MCP Servers") {
                 if servers.isEmpty {
                     Text("No MCP servers configured. Add some in Settings.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(Theme.Typography.font(.caption)).foregroundStyle(.secondary)
                 }
                 ForEach(servers) { server in
                     Toggle(isOn: membership(of: server.id, in: $selectedServerIDs)) {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(server.name)
                             Text(server.transport.label)
-                                .font(.caption2).foregroundStyle(.secondary)
+                                .font(Theme.Typography.font(.caption)).foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -158,14 +158,14 @@ struct AgentEditorView: View {
             Section("Knowledge") {
                 if knowledgeBundles.isEmpty {
                     Text("No knowledge bundles yet. Add some from the sidebar.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(Theme.Typography.font(.caption)).foregroundStyle(.secondary)
                 }
                 ForEach(knowledgeBundles) { bundle in
                     Toggle(isOn: membership(of: bundle.id, in: $selectedBundleIDs)) {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(bundle.name)
                             Text("\(bundle.conceptCount) concepts")
-                                .font(.caption2).foregroundStyle(.secondary)
+                                .font(Theme.Typography.font(.caption)).foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -178,7 +178,7 @@ struct AgentEditorView: View {
                             Text(skill.name)
                             if !skill.summary.isEmpty {
                                 Text(skill.summary)
-                                    .font(.caption2).foregroundStyle(.secondary)
+                                    .font(Theme.Typography.font(.caption)).foregroundStyle(.secondary)
                             }
                         }
                     }

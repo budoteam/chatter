@@ -55,7 +55,7 @@ struct AgentMemoriesSheet: View {
                         TextField("Memory", text: binding(for: entry), axis: .vertical)
                             .lineLimit(1...6)
                         Text(entry.updatedAt.formatted(date: .abbreviated, time: .shortened))
-                            .font(.caption2).foregroundStyle(.secondary)
+                            .font(Theme.Typography.font(.caption)).foregroundStyle(.secondary)
                     }
                     .padding(.vertical, 2)
                 }

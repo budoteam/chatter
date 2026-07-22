@@ -32,7 +32,7 @@ enum SessionFactory {
 
 struct GradientText: View {
     let text: String
-    var font: Font = .largeTitle.weight(.semibold)
+    var font: Font = Theme.Typography.font(.display)
 
     var body: some View {
         Text(text)

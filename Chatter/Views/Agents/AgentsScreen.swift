@@ -49,7 +49,7 @@ struct AgentsScreen: View {
                 Spacer(minLength: 0)
                 if agent.isDefault {
                     Text("Default")
-                        .font(.caption2.weight(.semibold))
+                        .font(Theme.Typography.font(.caption).weight(.semibold))
                         .foregroundStyle(Theme.accent)
                         .padding(.horizontal, 7).padding(.vertical, 3)
                         .background(Theme.accent.opacity(0.12), in: Capsule())
@@ -58,17 +58,17 @@ struct AgentsScreen: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(agent.name)
-                    .font(.headline)
+                    .font(Theme.Typography.font(.title2))
                     .lineLimit(1)
                 Text(agent.modelId.isEmpty ? "No model" : agent.modelId)
-                    .font(.caption)
+                    .font(Theme.Typography.font(.caption))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
 
             if !agent.systemPrompt.isEmpty {
                 Text(agent.systemPrompt)
-                    .font(.caption2)
+                    .font(Theme.Typography.font(.caption))
                     .foregroundStyle(.tertiary)
                     .lineLimit(2)
             }
@@ -77,7 +77,7 @@ struct AgentsScreen: View {
 
             Button { startChat(agent) } label: {
                 Label("New Chat", systemImage: "plus.bubble")
-                    .font(.caption.weight(.semibold))
+                    .font(Theme.Typography.font(.caption).weight(.semibold))
                     .foregroundStyle(Theme.accent)
             }
             .buttonStyle(.plain)

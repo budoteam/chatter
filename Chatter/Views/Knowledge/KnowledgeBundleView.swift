@@ -205,7 +205,7 @@ struct KnowledgeBundleView: View {
                 Text(concept.displayTitle)
                     .lineLimit(1)
                 Text(subtitle(for: concept))
-                    .font(.caption2).foregroundStyle(.secondary)
+                    .font(Theme.Typography.font(.caption)).foregroundStyle(.secondary)
                     .lineLimit(1)
             }
             .padding(.vertical, 1)

@@ -140,10 +140,10 @@ struct SkillsScreen: View {
     private func row(for skill: Skill) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(skill.name)
-                .font(.body.weight(.medium))
+                .font(Theme.Typography.font(.bodyEmphasis))
             if !skill.summary.isEmpty {
                 Text(skill.summary)
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(Theme.Typography.font(.caption)).foregroundStyle(.secondary)
                     .lineLimit(2)
             }
         }

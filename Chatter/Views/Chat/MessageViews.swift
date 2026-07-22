@@ -126,6 +126,7 @@ struct AssistantMessage: View {
                     TypingIndicator().padding(.top, 6)
                 } else if !message.content.isEmpty {
                     MarkdownText(text: message.content)
+                        .font(Theme.Typography.font(.body))
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
@@ -155,7 +156,7 @@ struct ThoughtsDisclosure: View {
                     Image(systemName: isOpen ? "chevron.up" : "chevron.down")
                         .font(.system(size: 8, weight: .bold))
                 }
-                .font(.caption.weight(.medium))
+                .font(Theme.Typography.font(.caption).weight(.medium))
                 .foregroundStyle(.secondary)
                 .contentShape(Rectangle())
             }
@@ -170,7 +171,7 @@ struct ThoughtsDisclosure: View {
                         // must not shove the whole chat around either.
                         ScrollView {
                             MarkdownText(text: text)
-                                .font(.callout)
+                                .font(Theme.Typography.font(.callout))
                                 .foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
@@ -187,7 +188,7 @@ struct ThoughtsDisclosure: View {
         }
         // Matches scrollToBottom's curve so the auto-collapse (isThinking →
         // false) and the re-pin scroll compose instead of jumping.
-        .animation(.easeOut(duration: 0.2), value: isOpen)
+        .animation(Theme.Motion.Easing.standard, value: isOpen)
     }
 }
 
@@ -204,7 +205,7 @@ private struct LiveThinkingTrace: View {
             ScrollView {
                 VStack(spacing: 0) {
                     MarkdownText(text: text)
-                        .font(.callout)
+                        .font(Theme.Typography.font(.callout))
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     Color.clear.frame(height: 1).id("tail")
@@ -270,7 +271,7 @@ struct ActivityGroupView: View {
                             .font(.system(size: 9, weight: .bold))
                     }
                 }
-                .font(.caption.weight(.medium))
+                .font(Theme.Typography.font(.caption).weight(.medium))
                 .foregroundStyle(.secondary)
                 .contentShape(Rectangle())
             }
@@ -300,7 +301,7 @@ struct ActivityGroupView: View {
         .padding(.leading, 36)  // aligns with the assistant text column
         // Matches scrollToBottom's curve so the auto-collapse (live → false)
         // and the re-pin scroll compose instead of jumping.
-        .animation(.easeOut(duration: 0.2), value: isOpen)
+        .animation(Theme.Motion.Easing.standard, value: isOpen)
     }
 }
 
@@ -320,7 +321,7 @@ private struct StepView: View {
                 }
                 if !message.content.isEmpty {
                     MarkdownText(text: message.content)
-                        .font(.callout)
+                        .font(Theme.Typography.font(.callout))
                         .foregroundStyle(.secondary)
                 }
                 ForEach(message.toolCalls) { call in
@@ -347,18 +348,18 @@ struct ArtifactPill: View {
         Button(action: onTap) {
             HStack(spacing: 8) {
                 Image(systemName: artifact.kind.iconName)
-                    .font(.caption)
+                    .font(Theme.Typography.font(.caption))
                     .foregroundStyle(Theme.accent)
                 Text(artifact.name)
-                    .font(.caption.weight(.medium))
+                    .font(Theme.Typography.font(.caption).weight(.medium))
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Text(sizeString)
-                    .font(.caption2)
+                    .font(Theme.Typography.font(.caption))
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 0)
                 Image(systemName: "arrow.up.forward.square")
-                    .font(.caption2)
+                    .font(Theme.Typography.font(.caption))
                     .foregroundStyle(.secondary)
             }
             .padding(10)
@@ -404,14 +405,14 @@ struct ToolCallCard: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "wrench.and.screwdriver.fill")
-                .font(.caption2)
+                .font(Theme.Typography.font(.caption))
                 .foregroundStyle(Theme.accent)
             VStack(alignment: .leading, spacing: 1) {
                 Text(displayName)
-                    .font(.caption.weight(.medium))
+                    .font(Theme.Typography.font(.caption).weight(.medium))
                 if !call.argumentsJSON.isEmpty && call.argumentsJSON != "{}" {
                     Text(call.argumentsJSON)
-                        .font(.caption2.monospaced())
+                        .font(Theme.Typography.font(.monoSmall))
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                 }
@@ -444,10 +445,10 @@ struct ToolResultCard: View {
         if isArtifactResult {
             HStack(spacing: 8) {
                 Image(systemName: "checkmark.circle.fill")
-                    .font(.caption)
+                    .font(Theme.Typography.font(.caption))
                     .foregroundStyle(.green)
                 Text(message.content)
-                    .font(.caption)
+                    .font(Theme.Typography.font(.caption))
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
                 Spacer(minLength: 0)
@@ -461,13 +462,13 @@ struct ToolResultCard: View {
 
     private var regularBody: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Button { withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() } } label: {
+            Button { withAnimation(Theme.Motion.Easing.standard) { expanded.toggle() } } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "arrow.turn.down.right")
-                        .font(.caption2)
+                        .font(Theme.Typography.font(.caption))
                         .foregroundStyle(.secondary)
                     Text(displayName)
-                        .font(.caption.weight(.medium))
+                        .font(Theme.Typography.font(.caption).weight(.medium))
                         .foregroundStyle(.secondary)
                     Spacer(minLength: 0)
                     Image(systemName: expanded ? "chevron.up" : "chevron.down")
@@ -481,7 +482,7 @@ struct ToolResultCard: View {
             if expanded {
                 ScrollView {
                     Text(message.content)
-                        .font(.caption.monospaced())
+                        .font(Theme.Typography.font(.monoSmall))
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }

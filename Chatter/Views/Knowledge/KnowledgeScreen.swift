@@ -81,17 +81,17 @@ struct KnowledgeScreen: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(bundle.name)
-                    .font(.headline)
+                    .font(Theme.Typography.font(.title2))
                     .lineLimit(2)
                 Text("\(bundle.conceptCount) concepts")
-                    .font(.caption)
+                    .font(Theme.Typography.font(.caption))
                     .foregroundStyle(.secondary)
             }
 
             Spacer(minLength: 4)
 
             Label("Open", systemImage: "arrow.up.right.square")
-                .font(.caption.weight(.semibold))
+                .font(Theme.Typography.font(.caption).weight(.semibold))
                 .foregroundStyle(Theme.accent)
         }
         .overviewCardStyle()

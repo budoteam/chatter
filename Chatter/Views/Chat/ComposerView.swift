@@ -36,7 +36,7 @@ struct ComposerView: View {
             }
             if imageLimitHit, !viewModel.pendingImages.isEmpty {
                 Text("Some images were skipped — attachments are limited to 700 KB per message so the chat keeps syncing via iCloud.")
-                    .font(.caption2)
+                    .font(Theme.Typography.font(.caption))
                     .foregroundStyle(.orange)
                     .padding(.horizontal, 4)
             }
@@ -115,7 +115,7 @@ struct ComposerView: View {
         .background(
             RoundedRectangle(cornerRadius: 26, style: .continuous)
                 .fill(Theme.surface)
-                .shadow(color: .black.opacity(0.07), radius: 16, y: 5)
+                .elevated(Theme.Elevation.level1)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 26, style: .continuous)
@@ -224,7 +224,7 @@ struct ComposerView: View {
                 Image(systemName: "chevron.down")
                     .font(.system(size: 8, weight: .bold))
             }
-            .font(.caption.weight(.medium))
+            .font(Theme.Typography.font(.caption).weight(.medium))
             .foregroundStyle(.secondary)
             .padding(.horizontal, 9)
             .padding(.vertical, 5)
@@ -285,7 +285,7 @@ struct ComposerView: View {
         .buttonStyle(.plain)
         .disabled(!viewModel.hasDraft && !isSending)
         .keyboardShortcut(.return, modifiers: .command)
-        .animation(.easeInOut(duration: 0.15), value: isSending)
+        .animation(Theme.Motion.Easing.standard, value: isSending)
         .accessibilityLabel(Text(isSending ? "Stop" : "Send"))
     }
 

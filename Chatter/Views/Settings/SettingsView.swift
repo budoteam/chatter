@@ -54,22 +54,22 @@ struct SettingsView: View {
             }
             if savedConfirmation {
                 Label("Saved", systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green).font(.caption)
+                    .foregroundStyle(.green).font(Theme.Typography.font(.caption))
             }
             if let keySaveError {
                 Label(keySaveError, systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.red).font(.caption)
+                    .foregroundStyle(.red).font(Theme.Typography.font(.caption))
             }
             // Live connection status so a bad key (401 etc.) is visible here.
             if env.isLoadingModels {
                 Label("Checking key…", systemImage: "hourglass")
-                    .foregroundStyle(.secondary).font(.caption)
+                    .foregroundStyle(.secondary).font(Theme.Typography.font(.caption))
             } else if let error = env.modelLoadError {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange).font(.caption)
+                    .foregroundStyle(.orange).font(Theme.Typography.font(.caption))
             } else if !env.models.isEmpty {
                 Label("Connected — \(env.models.count) models available", systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green).font(.caption)
+                    .foregroundStyle(.green).font(Theme.Typography.font(.caption))
             }
         } header: {
             Text("Ollama Cloud")
@@ -92,10 +92,10 @@ struct SettingsView: View {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(server.name).foregroundStyle(.primary)
                             Text(subtitle(for: server))
-                                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                .font(Theme.Typography.font(.caption)).foregroundStyle(.secondary).lineLimit(1)
                         }
                         Spacer()
-                        Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                        Image(systemName: "chevron.right").font(Theme.Typography.font(.caption)).foregroundStyle(.tertiary)
                     }
                 }
                 .buttonStyle(.plain)
@@ -191,11 +191,11 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .font(.callout)
+        .font(Theme.Typography.font(.body))
         if !status.succeeded, let error = status.errorDescription {
             Label(error, systemImage: "exclamationmark.triangle.fill")
                 .foregroundStyle(.orange)
-                .font(.caption)
+                .font(Theme.Typography.font(.caption))
         }
     }
 

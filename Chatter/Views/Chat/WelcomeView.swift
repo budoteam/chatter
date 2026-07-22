@@ -19,9 +19,9 @@ struct WelcomeView: View {
             Spacer()
 
             VStack(spacing: 10) {
-                GradientText(text: "Hello there", font: .system(size: 40, weight: .semibold))
+                GradientText(text: "Hello there", font: Theme.Typography.font(.display))
                 Text("How can I help you today?")
-                    .font(.title3)
+                    .font(Theme.Typography.font(.body))
                     .foregroundStyle(.secondary)
             }
 
@@ -36,7 +36,7 @@ struct WelcomeView: View {
                                 .font(.system(size: 15, weight: .medium))
                                 .foregroundStyle(Theme.accent)
                             Text(suggestion.title)
-                                .font(.subheadline.weight(.medium))
+                                .font(Theme.Typography.font(.bodyEmphasis))
                                 .foregroundStyle(.primary)
                                 .multilineTextAlignment(.leading)
                         }
@@ -59,7 +59,7 @@ struct WelcomeView: View {
 
             Button(action: onNewChat) {
                 Label("New Chat", systemImage: "plus.bubble.fill")
-                    .font(.subheadline.weight(.semibold))
+                    .font(Theme.Typography.font(.title3))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 20)
                     .padding(.vertical, 11)

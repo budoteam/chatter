@@ -71,9 +71,9 @@ struct MarkdownText: View {
 
     private func headingFont(_ level: Int) -> Font {
         switch level {
-        case 1: return .title2.weight(.semibold)
-        case 2: return .title3.weight(.semibold)
-        default: return .headline
+        case 1: return Theme.Typography.font(.title1)
+        case 2: return Theme.Typography.font(.title2)
+        default: return Theme.Typography.font(.title3)
         }
     }
 
@@ -106,7 +106,7 @@ struct MarkdownText: View {
 
     private func tableCell(_ string: String, isHeader: Bool) -> some View {
         Text(Self.inline(string))
-            .font(.callout.weight(isHeader ? .semibold : .regular))
+            .font(Theme.Typography.font(.callout).weight(isHeader ? .semibold : .regular))
             .textSelection(.enabled)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)

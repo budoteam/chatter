@@ -26,11 +26,11 @@ struct ArtifactPaneView: View {
                 .foregroundStyle(Theme.accent)
             VStack(alignment: .leading, spacing: 1) {
                 Text(artifact.name)
-                    .font(.headline)
+                    .font(Theme.Typography.font(.title2))
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Text("\(artifact.kind.label) · \(sizeString)")
-                    .font(.caption)
+                    .font(Theme.Typography.font(.caption))
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: 8)
@@ -77,11 +77,11 @@ struct ArtifactPaneView: View {
             VStack(alignment: .leading, spacing: 8) {
                 if let note {
                     Text(note)
-                        .font(.caption)
+                        .font(Theme.Typography.font(.caption))
                         .foregroundStyle(.secondary)
                 }
                 Text(artifact.content)
-                    .font(.callout.monospaced())
+                    .font(Theme.Typography.font(.mono))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -206,7 +206,7 @@ private struct CSVTableView: View {
                 }
                 if table.rows.count > CSVTable.maxRenderedRows {
                     Text("… \(table.rows.count - CSVTable.maxRenderedRows) more rows (use Share to export the full file)")
-                        .font(.caption)
+                        .font(Theme.Typography.font(.caption))
                         .foregroundStyle(.secondary)
                         .padding(12)
                 }
@@ -216,7 +216,7 @@ private struct CSVTableView: View {
 
     private func cell(_ string: String, isHeader: Bool) -> some View {
         Text(string)
-            .font(isHeader ? .callout.weight(.semibold) : .callout)
+            .font(isHeader ? Theme.Typography.font(.callout).weight(.semibold) : Theme.Typography.font(.callout))
             .foregroundStyle(isHeader ? .primary : .secondary)
             .lineLimit(1)
             .padding(.horizontal, 12)

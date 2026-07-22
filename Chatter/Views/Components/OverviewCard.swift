@@ -60,7 +60,7 @@ struct AddEntityCard<MenuContent: View>: View {
                 .font(.system(size: 18, weight: .bold))
                 .foregroundStyle(Theme.accent)
             Text(title)
-                .font(.subheadline.weight(.medium))
+                .font(Theme.Typography.font(.bodyEmphasis))
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, minHeight: 150)

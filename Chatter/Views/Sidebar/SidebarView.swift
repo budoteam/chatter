@@ -48,7 +48,7 @@ struct SidebarView: View {
                 Image(systemName: "plus.bubble.fill")
                     .font(.system(size: 13, weight: .semibold))
                 Text("New Chat")
-                    .font(.subheadline.weight(.semibold))
+                    .font(Theme.Typography.font(.title3))
                 Spacer(minLength: 0)
             }
             .foregroundStyle(.white)
@@ -90,7 +90,7 @@ struct SidebarView: View {
                     .font(.system(size: 15, weight: .semibold))
                     .symbolRenderingMode(.hierarchical)
                 Text(title)
-                    .font(.caption2.weight(.semibold))
+                    .font(Theme.Typography.font(.caption).weight(.semibold))
             }
             .foregroundStyle(isActive ? Theme.accent : Color.secondary)
             .frame(maxWidth: .infinity)
@@ -161,7 +161,7 @@ struct SidebarView: View {
                     (session.agent?.color ?? Theme.accent).opacity(0.75)
                 )
             Text(session.title.isEmpty ? "New Chat" : session.title)
-                .font(.subheadline)
+                .font(Theme.Typography.font(.body))
                 .lineLimit(1)
             Spacer(minLength: 0)
         }
@@ -174,10 +174,10 @@ struct SidebarView: View {
                 .font(.system(size: 22, weight: .medium))
                 .foregroundStyle(.tertiary)
             Text("No chats yet")
-                .font(.subheadline.weight(.medium))
+                .font(Theme.Typography.font(.bodyEmphasis))
                 .foregroundStyle(.secondary)
             Text("Start a conversation with New Chat.")
-                .font(.caption)
+                .font(Theme.Typography.font(.caption))
                 .foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity)
@@ -188,7 +188,7 @@ struct SidebarView: View {
 
     private func sectionHeader(_ title: String) -> some View {
         Text(title)
-            .font(.caption2.weight(.semibold))
+            .font(Theme.Typography.font(.caption).weight(.semibold))
             .foregroundStyle(.tertiary)
             .textCase(.uppercase)
             .padding(.top, 4)

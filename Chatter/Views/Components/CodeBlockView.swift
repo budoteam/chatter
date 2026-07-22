@@ -71,7 +71,7 @@ struct CodeBlockView: View {
             HStack(spacing: 4) {
                 if let language, !language.isEmpty {
                     Text(language)
-                        .font(.caption2.weight(.medium))
+                        .font(Theme.Typography.font(.caption).weight(.medium))
                         .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 12)
@@ -88,7 +88,7 @@ struct CodeBlockView: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(content)
-                    .font(.system(.callout, design: .monospaced))
+                    .font(Theme.Typography.font(.mono))
                     .textSelection(.enabled)
                     .padding(12)
             }

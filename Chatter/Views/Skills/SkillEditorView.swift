@@ -53,7 +53,7 @@ struct SkillEditorView: View {
                     // TextEditor, not TextField(axis: .vertical) — see
                     // AgentEditorView's system-prompt field.
                     TextEditor(text: $content)
-                        .font(.body.monospaced())
+                        .font(Theme.Typography.font(.mono))
                         .frame(minHeight: 220)
                 } header: {
                     Text("Content")

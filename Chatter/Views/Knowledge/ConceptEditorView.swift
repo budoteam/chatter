@@ -19,16 +19,16 @@ struct ConceptEditorView: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     #endif
-                    .font(.body.monospaced())
+                    .font(Theme.Typography.font(.mono))
                     .onSubmit(commitPath)
                 if let issue = pathIssue {
-                    Text(issue).font(.caption).foregroundStyle(.red)
+                    Text(issue).font(Theme.Typography.font(.caption)).foregroundStyle(.red)
                 }
             } header: {
                 Text("Path")
             } footer: {
                 Text("Bundle-relative path without “.md”, e.g. tables/users. Exports as \(pathDraft.isEmpty ? "…" : pathDraft).md")
-                    .font(.caption2)
+                    .font(Theme.Typography.font(.caption))
             }
 
             if concept.kind == .concept {
@@ -38,7 +38,7 @@ struct ConceptEditorView: View {
 
             Section(concept.kind == .concept ? "Body (Markdown)" : "Contents (Markdown)") {
                 TextEditor(text: $concept.body)
-                    .font(.body.monospaced())
+                    .font(Theme.Typography.font(.mono))
                     .frame(minHeight: 220)
             }
         }
@@ -64,7 +64,7 @@ struct ConceptEditorView: View {
             TextField("Type", text: $concept.typeName)
             if concept.typeName.trimmingCharacters(in: .whitespaces).isEmpty {
                 Text("OKF requires a non-empty type (e.g. note, table, playbook).")
-                    .font(.caption).foregroundStyle(.red)
+                    .font(Theme.Typography.font(.caption)).foregroundStyle(.red)
             }
             TextField("Title", text: optional($concept.title))
             TextField("Description", text: optional($concept.summary), axis: .vertical)
@@ -77,7 +77,7 @@ struct ConceptEditorView: View {
             TextField("Tags (comma-separated)", text: tagsBinding)
             HStack {
                 TextField("Timestamp (ISO 8601)", text: optional($concept.timestampRaw))
-                    .font(.body.monospaced())
+                    .font(Theme.Typography.font(.mono))
                 Button("Now") {
                     concept.timestampRaw = KnowledgeConcept.currentTimestampString()
                 }
@@ -95,13 +95,13 @@ struct ConceptEditorView: View {
                 Section {
                     DisclosureGroup("Custom Fields (\(extras.count))") {
                         Text(extras.map(\.rawBlock).joined(separator: "\n"))
-                            .font(.caption.monospaced())
+                            .font(Theme.Typography.font(.monoSmall))
                             .foregroundStyle(.secondary)
                             .textSelection(.enabled)
                     }
                 } footer: {
                     Text("Frontmatter keys Chatter doesn’t model. Preserved verbatim on export.")
-                        .font(.caption2)
+                        .font(Theme.Typography.font(.caption))
                 }
             }
         }

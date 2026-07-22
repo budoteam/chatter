@@ -94,19 +94,26 @@ enum Theme {
     // MARK: Typography
     enum Typography {
         /// Raw scale values; `font(_:)` materialises these into `Font` styles.
-        typealias Style = (size: CGFloat, weight: Font.Weight, line: CGFloat, tracking: CGFloat)
+        /// A struct (not a tuple) so call sites can use implicit member syntax
+        /// (`Theme.Typography.font(.body)`) — tuples can't carry static members.
+        struct Style {
+            let size: CGFloat
+            let weight: Font.Weight
+            let line: CGFloat
+            let tracking: CGFloat
 
-        static let display: Style = (30, .semibold, 36, -0.4)
-        static let title1: Style = (22, .semibold, 28, -0.3)
-        static let title2: Style = (17, .semibold, 22, -0.2)
-        static let title3: Style = (15, .semibold, 20, -0.1)
-        static let body: Style = (15, .regular, 22, 0)
-        static let bodyEmphasis: Style = (15, .medium, 22, 0)
-        static let callout: Style = (14, .regular, 20, 0)
-        static let footnote: Style = (13, .regular, 18, 0.1)
-        static let caption: Style = (12, .regular, 16, 0.2)
-        static let mono: Style = (13, .regular, 20, 0)
-        static let monoSmall: Style = (12, .regular, 18, 0)
+            static let display = Style(size: 30, weight: .semibold, line: 36, tracking: -0.4)
+            static let title1 = Style(size: 22, weight: .semibold, line: 28, tracking: -0.3)
+            static let title2 = Style(size: 17, weight: .semibold, line: 22, tracking: -0.2)
+            static let title3 = Style(size: 15, weight: .semibold, line: 20, tracking: -0.1)
+            static let body = Style(size: 15, weight: .regular, line: 22, tracking: 0)
+            static let bodyEmphasis = Style(size: 15, weight: .medium, line: 22, tracking: 0)
+            static let callout = Style(size: 14, weight: .regular, line: 20, tracking: 0)
+            static let footnote = Style(size: 13, weight: .regular, line: 18, tracking: 0.1)
+            static let caption = Style(size: 12, weight: .regular, line: 16, tracking: 0.2)
+            static let mono = Style(size: 13, weight: .regular, line: 20, tracking: 0)
+            static let monoSmall = Style(size: 12, weight: .regular, line: 18, tracking: 0)
+        }
 
         static func font(_ style: Style) -> Font {
             .system(size: style.size, weight: style.weight)

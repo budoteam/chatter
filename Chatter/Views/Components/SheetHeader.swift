@@ -16,7 +16,7 @@ struct SheetHeader<Leading: View, Trailing: View>: View {
             leading
                 .frame(maxWidth: .infinity, alignment: .leading)
             Text(title)
-                .font(.headline)
+                .font(Theme.Typography.font(.title2))
                 .lineLimit(1)
             trailing
                 .frame(maxWidth: .infinity, alignment: .trailing)

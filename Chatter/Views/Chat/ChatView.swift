@@ -30,7 +30,7 @@ struct ChatView: View {
                 if let agent = session.agent {
                     HStack(spacing: 7) {
                         AgentBadge(symbol: agent.iconSymbol, color: agent.color, size: 20)
-                        Text(agent.name).font(.headline)
+                        Text(agent.name).font(Theme.Typography.font(.title2))
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 2)
@@ -91,9 +91,9 @@ struct ChatView: View {
         if session.orderedMessages.isEmpty {
             // Fresh chat — greet instead of showing an empty scroll area.
             VStack(spacing: 8) {
-                GradientText(text: "Hello", font: .system(size: 32, weight: .semibold))
+                GradientText(text: "Hello", font: Theme.Typography.font(.display))
                 Text("Ask \(session.agent?.name ?? "Chatter") anything")
-                    .font(.callout)
+                    .font(Theme.Typography.font(.callout))
                     .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -279,7 +279,7 @@ struct ChatView: View {
         scrollTask = Task { @MainActor in
             guard !Task.isCancelled else { return }
             if animated {
-                withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(bottomID, anchor: .bottom) }
+                withAnimation(Theme.Motion.Easing.standard) { proxy.scrollTo(bottomID, anchor: .bottom) }
             } else {
                 // disablesAnimations, not just "no withAnimation": the scroll
                 // must not inherit a transaction that is already in flight

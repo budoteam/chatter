@@ -93,9 +93,9 @@ struct PDFImportSheet: View {
                         .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
                     VStack(alignment: .leading, spacing: 2) {
                         Text("\(urls.count) PDF\(urls.count == 1 ? "" : "s") selected")
-                            .font(.headline)
+                            .font(Theme.Typography.font(.title2))
                         Text("Import into “\(bundle.name)”")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(Theme.Typography.font(.caption)).foregroundStyle(.secondary)
                     }
                 }
                 .padding(.vertical, 4)
@@ -127,7 +127,7 @@ struct PDFImportSheet: View {
                 } else {
                     Label {
                         Text("No API key or models available — PDFs will be imported as raw text without AI conversion.")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(Theme.Typography.font(.caption)).foregroundStyle(.secondary)
                     } icon: {
                         Image(systemName: "exclamationmark.triangle")
                             .foregroundStyle(.orange)
@@ -152,7 +152,7 @@ struct PDFImportSheet: View {
             Image(systemName: "doc.fill")
                 .foregroundStyle(.secondary)
         }
-        .font(.callout)
+        .font(Theme.Typography.font(.body))
     }
 
     private func runningContent(current: Int, total: Int, fileName: String) -> some View {
@@ -164,12 +164,12 @@ struct PDFImportSheet: View {
                     .controlSize(.regular)
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Converting \(current) of \(total)")
-                        .font(.subheadline.weight(.medium))
+                        .font(Theme.Typography.font(.bodyEmphasis))
                     Text(fileName)
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(Theme.Typography.font(.caption)).foregroundStyle(.secondary)
                         .lineLimit(1).truncationMode(.middle)
                     Text("Imported so far: \(job.report.imported) concepts")
-                        .font(.caption2).foregroundStyle(.tertiary)
+                        .font(Theme.Typography.font(.caption)).foregroundStyle(.tertiary)
                 }
             }
             .padding(.vertical, 6)
