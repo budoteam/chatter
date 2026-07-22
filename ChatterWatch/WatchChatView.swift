@@ -11,8 +11,14 @@ struct WatchChatView: View {
 
     let session: ChatSession
     @State private var viewModel = ChatViewModel()
-    /// Bumped after sending to force-recreate the TextField (see `send()`).
-    @State private var composerID = UUID()
+    /// Local composer draft, decoupled from `viewModel.inputText`: watchOS
+    /// commits dictated text into the binding *after* `onSubmit`, so a direct
+    /// binding to the view model replays the just-sent text into the field.
+    @State private var draft = ""
+    /// Armed briefly after sending to swallow the late dictation commit.
+    @State private var justSent = false
+    /// The text as it was sent — the late commit re-writes exactly this.
+    @State private var lastSentText = ""
 
     /// Tool calls and empty assistant stubs stay invisible — on the watch the
     /// answer is what matters.
@@ -64,9 +70,18 @@ struct WatchChatView: View {
 
     private var composer: some View {
         HStack(spacing: 6) {
-            TextField("Message", text: $viewModel.inputText)
+            TextField("Message", text: $draft)
                 .onSubmit(send)
-                .id(composerID)
+                .onChange(of: draft) { _, newValue in
+                    // watchOS commits dictation/scribble text back into the
+                    // binding after onSubmit. Discard that replay; mirror
+                    // everything else into the view model for `hasDraft`.
+                    if justSent, newValue == lastSentText, !newValue.isEmpty {
+                        draft = ""
+                        return
+                    }
+                    viewModel.inputText = newValue
+                }
             if env.isSending(session) {
                 Button(role: .destructive) {
                     viewModel.stop(env: env, session: session)
@@ -86,13 +101,20 @@ struct WatchChatView: View {
     }
 
     private func send() {
+        let sent = draft
+        viewModel.inputText = sent
         viewModel.send(env: env, session: session, agent: session.agent, context: context)
-        // watchOS commits the dictated text into the binding *after* onSubmit
-        // already ran — overwriting the clear in ChatViewModel.send and/or
-        // leaving the field displaying the committed text. Recreate the
-        // field and re-clear on the next runloop turn to cover both orders.
-        composerID = UUID()
-        Task { @MainActor in viewModel.inputText = "" }
+        // Arm the late-commit guard *before* clearing, so a dictation
+        // re-commit of the sent text is swallowed by `onChange` above.
+        // 250 ms covers the modal dictation controller's commit delay while
+        // staying below a noticeable typing gap.
+        lastSentText = sent
+        justSent = true
+        draft = ""
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(250))
+            justSent = false
+        }
     }
 
     // MARK: - Bubbles
