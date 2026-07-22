@@ -54,7 +54,7 @@ struct SidebarView: View {
             .foregroundStyle(.white)
             .padding(.horizontal, 16)
             .padding(.vertical, 11)
-            .background(Theme.brandGradient, in: Capsule())
+            .background(Theme.accentFill, in: Capsule())
             .shadow(color: Theme.accent.opacity(0.28), radius: 8, y: 3)
             .contentShape(Capsule())
         }

@@ -63,7 +63,7 @@ struct WelcomeView: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, 20)
                     .padding(.vertical, 11)
-                    .background(Theme.brandGradient, in: Capsule())
+                    .background(Theme.accentFill, in: Capsule())
             }
             .buttonStyle(.plain)
 

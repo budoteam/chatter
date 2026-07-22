@@ -293,7 +293,7 @@ struct ComposerView: View {
         if isSending {
             AnyShapeStyle(Color.secondary.opacity(0.85))
         } else if viewModel.hasDraft {
-            AnyShapeStyle(Theme.brandGradient)
+            AnyShapeStyle(Theme.accentFill)
         } else {
             AnyShapeStyle(Color.secondary.opacity(0.35))
         }

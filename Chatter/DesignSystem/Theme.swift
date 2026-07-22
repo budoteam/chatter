@@ -5,47 +5,156 @@ import UIKit
 import AppKit
 #endif
 
-/// Central design tokens. Tuned to echo the Google Gemini app: airy neutral
-/// canvas, soft rounded surfaces, and a signature blue→violet→magenta gradient.
+/// Central design tokens. Iris accent on a quiet neutral canvas, a five-level
+/// surface hierarchy, explicit text steps, and a unified type/space/radius/motion
+/// scale. Content before chrome: compact spacing, technical radii.
 enum Theme {
     // MARK: Brand gradient
     static let brandGradient = LinearGradient(
         colors: [
-            Color(hex: "4F86FF"), // blue
-            Color(hex: "8A5CF6"), // violet
-            Color(hex: "E15CC0"), // magenta
+            Color(hex: "6947D7"), // iris
+            Color(hex: "8E6BE6"), // lavender
+            Color(hex: "B886E6"), // pink
         ],
         startPoint: .topLeading,
         endPoint: .bottomTrailing
     )
 
-    static let accent = Color(hex: "6C5CE7")
+    // MARK: Accent
+    static let accent = Color.dynamic(light: "6947D7", dark: "9A8BF0")
+
+    // MARK: Accent fill (solid)
+    /// Solid Iris for primary action surfaces (replaces brandGradient on buttons).
+    static let accentFill = Color.dynamic(light: "6947D7", dark: "9A8BF0")
 
     // MARK: Surfaces (semantic, adapt to light/dark)
-    static let canvas = Color.dynamic(light: "FBFBFD", dark: "121316")
-    static let surface = Color.dynamic(light: "FFFFFF", dark: "1C1D21")
-    static let surfaceRaised = Color.dynamic(light: "F0F1F5", dark: "26272C")
-    static let userBubble = Color.dynamic(light: "ECEEF6", dark: "2B2D34")
-    static let separator = Color.dynamic(light: "E6E7EC", dark: "303138")
+    static let canvas = Color.dynamic(light: "F6F6F8", dark: "0F1013")
+    static let surface = Color.dynamic(light: "FFFFFF", dark: "17191E")
+    static let surfaceRaised = Color.dynamic(light: "EEEFF3", dark: "20232A")
+    static let overlay = Color.dynamic(light: "FFFFFF", dark: "23262E")
+    // Opacity (24% light / 40% dark) is applied at the callsite.
+    static let scrim = Color.dynamic(light: "000000", dark: "000000")
+
+    // MARK: Brand surface (user bubble)
+    static let userBubble = Color.dynamic(light: "ECE9FA", dark: "292743")
+
+    // MARK: Separator
+    static let separator = Color.dynamic(light: "E3E4E9", dark: "2C2F37")
 
     // MARK: Text
-    static var textPrimary: Color { .primary }
-    static var textSecondary: Color { .secondary }
+    static let textPrimary = Color.dynamic(light: "17181D", dark: "F1F2F5")
+    static let textSecondary = Color.dynamic(light: "535864", dark: "A3A8B4")
+    static let textTertiary = Color.dynamic(light: "6C7387", dark: "8A91A0")
+
+    // MARK: Semantic
+    enum Semantic {
+        static let success = Color.dynamic(light: "1E9E66", dark: "46C489")
+        static let warning = Color.dynamic(light: "C26E00", dark: "F0B23E")
+        static let danger = Color.dynamic(light: "D23F3F", dark: "EE7070")
+        static let streamPulse = Color.dynamic(light: "6947D7", dark: "9A8BF0")
+    }
 
     // MARK: Metrics
     enum Radius {
-        static let sm: CGFloat = 12
-        static let md: CGFloat = 18
-        static let lg: CGFloat = 24
-        static let pill: CGFloat = 28
+        static let xs: CGFloat = 6
+        static let sm: CGFloat = 6
+        static let md: CGFloat = 10
+        static let lg: CGFloat = 14
+        static let xl: CGFloat = 20
+        static let pill: CGFloat = 9999
     }
 
     enum Spacing {
-        static let xs: CGFloat = 6
-        static let sm: CGFloat = 10
-        static let md: CGFloat = 16
-        static let lg: CGFloat = 24
-        static let xl: CGFloat = 36
+        static let xxs: CGFloat = 2
+        static let xs: CGFloat = 4
+        static let sm: CGFloat = 8
+        static let md: CGFloat = 12
+        static let lg: CGFloat = 16
+        static let xl: CGFloat = 24
+        static let xxl: CGFloat = 32
+        static let xxxl: CGFloat = 48
+    }
+
+    // MARK: Motion
+    enum Motion {
+        enum Duration {
+            static let instant: Double = 0
+            static let fast: Double = 0.12
+            static let normal: Double = 0.20
+            static let slow: Double = 0.32
+        }
+
+        enum Easing {
+            static let standard = Animation.timingCurve(0.2, 0, 0, 1, duration: Duration.normal)
+            static let decel = Animation.timingCurve(0, 0, 0.2, 1, duration: Duration.normal)
+            static let accel = Animation.timingCurve(0.4, 0, 1, 1, duration: Duration.normal)
+        }
+    }
+
+    // MARK: Typography
+    enum Typography {
+        /// Raw scale values; `font(_:)` materialises these into `Font` styles.
+        typealias Style = (size: CGFloat, weight: Font.Weight, line: CGFloat, tracking: CGFloat)
+
+        static let display: Style = (30, .semibold, 36, -0.4)
+        static let title1: Style = (22, .semibold, 28, -0.3)
+        static let title2: Style = (17, .semibold, 22, -0.2)
+        static let title3: Style = (15, .semibold, 20, -0.1)
+        static let body: Style = (15, .regular, 22, 0)
+        static let bodyEmphasis: Style = (15, .medium, 22, 0)
+        static let callout: Style = (14, .regular, 20, 0)
+        static let footnote: Style = (13, .regular, 18, 0.1)
+        static let caption: Style = (12, .regular, 16, 0.2)
+        static let mono: Style = (13, .regular, 20, 0)
+        static let monoSmall: Style = (12, .regular, 18, 0)
+
+        static func font(_ style: Style) -> Font {
+            .system(size: style.size, weight: style.weight)
+        }
+        static func lineHeight(_ style: Style) -> CGFloat { style.line }
+        static func tracking(_ style: Style) -> CGFloat { style.tracking }
+    }
+
+    // MARK: Elevation
+    enum Elevation {
+        /// Shadow parameters; opacity differs per appearance.
+        typealias ShadowStyle = (y: CGFloat, blur: CGFloat, opacityLight: Double, opacityDark: Double)
+
+        /// No shadow.
+        static let level0: ShadowStyle = (0, 0, 0, 0)
+        /// Cards, popovers.
+        static let level1: ShadowStyle = (1, 2, 0.06, 0.16)
+        /// Sheets, inspector.
+        static let level2: ShadowStyle = (8, 24, 0.10, 0.28)
+    }
+}
+
+// MARK: - Elevation view modifier
+
+private extension Theme.Elevation {
+    struct Modifier: ViewModifier {
+        let level: ShadowStyle
+        @Environment(\.colorScheme) private var colorScheme
+
+        func body(content: Content) -> some View {
+            if level.y == 0 && level.blur == 0 {
+                content
+            } else {
+                content.shadow(
+                    color: Color.black.opacity(colorScheme == .dark ? level.opacityDark : level.opacityLight),
+                    radius: level.blur / 2,
+                    y: level.y
+                )
+            }
+        }
+    }
+}
+
+extension View {
+    /// Applies the shadow style for a given elevation level.
+    /// - Parameter level: shadow parameters (y, blur, opacity per appearance).
+    func elevated(_ level: Theme.Elevation.ShadowStyle) -> some View {
+        modifier(Theme.Elevation.Modifier(level: level))
     }
 }
 
