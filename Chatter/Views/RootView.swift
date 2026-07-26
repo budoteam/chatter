@@ -61,6 +61,14 @@ struct RootView: View {
             await env.refreshModels()
             backfillAgentModels()
             await env.mcp.syncConnections(configs: allServers())
+            #if DEBUG
+            ScreenshotDemo.applyNavigation(
+                env: env,
+                context: context,
+                showSidebar: { preferredColumn = .sidebar },
+                openSettings: { showSettings = true }
+            )
+            #endif
         }
         .onChange(of: env.newSessionRequestID) { startNewSession() }
         .onChange(of: env.hasAPIKey) { Task { await env.refreshModels() } }

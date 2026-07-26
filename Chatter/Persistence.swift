@@ -33,6 +33,17 @@ enum Persistence {
     ])
 
     static func makeContainer() -> ModelContainer {
+        #if DEBUG
+        // Screenshot/demo runs: seeded in-memory store, never touching the
+        // user's data. Settings should still present the production-looking
+        // CloudKit state in the captures.
+        if ScreenshotDemo.isActive {
+            let container = ScreenshotDemo.makeContainer()
+            storeMode = .cloudKit
+            return container
+        }
+        #endif
+
         // Preferred: automatic CloudKit sync.
         let cloudConfig = ModelConfiguration(
             schema: schema,

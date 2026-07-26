@@ -72,6 +72,11 @@ enum KeychainService {
     }
 
     static func loadAPIKey() -> String? {
+        #if DEBUG
+        // Screenshot/demo runs pass the key via environment so the real
+        // keychain item is never read, written, or overwritten.
+        if let demoKey = ScreenshotDemo.apiKey { return demoKey }
+        #endif
         cacheLock.lock()
         if cacheValid {
             defer { cacheLock.unlock() }

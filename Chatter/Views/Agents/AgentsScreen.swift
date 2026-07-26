@@ -38,6 +38,15 @@ struct AgentsScreen: View {
         .sheet(isPresented: $showingNewAgent) {
             AgentEditorView(agent: nil)
         }
+        #if DEBUG
+        // Screenshot demo: open the editor for the first (default) agent so
+        // the capture shows the model selection of a real agent.
+        .onAppear {
+            if ScreenshotDemo.screen == "agent-editor", editingAgent == nil {
+                editingAgent = agents.first
+            }
+        }
+        #endif
     }
 
     // MARK: - Cards
