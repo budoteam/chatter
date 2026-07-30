@@ -235,6 +235,7 @@ private struct LiveThinkingTrace: View {
 struct ActivityGroupView: View {
     let steps: [Message]
     let live: Bool
+    var accent: Color = Theme.accent
 
     @State private var expanded = false
 
@@ -254,50 +255,51 @@ struct ActivityGroupView: View {
     private var isOpen: Bool { expanded || live }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button { expanded.toggle() } label: {
-                HStack(spacing: 8) {
-                    if live {
-                        ProgressView().controlSize(.small)
-                        Text("Working — running tools…")
-                    } else {
-                        Image(systemName: "wrench.and.screwdriver")
-                            .font(.system(size: 10, weight: .medium))
-                        Text(toolCallCount == 1 ? "Used 1 tool" : "Used \(toolCallCount) tools")
+        VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 0) {
+                Button { expanded.toggle() } label: {
+                    HStack(spacing: 8) {
+                        if live {
+                            ProgressView().controlSize(.small)
+                            Text("Working — running tools…")
+                        } else {
+                            Image(systemName: "wrench.and.screwdriver")
+                                .font(.system(size: 10, weight: .medium))
+                            Text(toolCallCount == 1 ? "Used 1 tool" : "Used \(toolCallCount) tools")
+                        }
+                        Spacer(minLength: 0)
+                        if !live {
+                            Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                                .font(.system(size: 9, weight: .bold))
+                        }
                     }
-                    Spacer(minLength: 0)
-                    if !live {
-                        Image(systemName: expanded ? "chevron.up" : "chevron.down")
-                            .font(.system(size: 9, weight: .bold))
-                    }
+                    .font(Theme.Typography.font(.caption).weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .contentShape(Rectangle())
                 }
-                .font(Theme.Typography.font(.caption).weight(.medium))
-                .foregroundStyle(.secondary)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
+                .buttonStyle(.plain)
 
-            if isOpen {
-                VStack(alignment: .leading, spacing: 12) {
-                    ForEach(steps) { StepView(message: $0) }
+                if isOpen {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(steps) { StepView(message: $0) }
+                    }
+                    .padding(.top, 12)
                 }
-                .padding(.top, 12)
             }
+            .padding(12)
+            .background(
+                Theme.surfaceRaised.opacity(0.45),
+                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+            )
 
             if !artifactCallIDs.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(artifactCallIDs, id: \.self) { callID in
-                        ArtifactPillLoader(sourceToolCallID: callID)
+                        ArtifactPillLoader(sourceToolCallID: callID, accent: accent)
                     }
                 }
-                .padding(.top, 12)
             }
         }
-        .padding(12)
-        .background(
-            Theme.surfaceRaised.opacity(0.45),
-            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-        )
         .padding(.leading, 36)  // aligns with the assistant text column
         // Matches scrollToBottom's curve so the auto-collapse (live → false)
         // and the re-pin scroll compose instead of jumping.
@@ -342,16 +344,18 @@ private struct StepView: View {
 /// opens the artifact in the inspector (macOS) or a sheet (iOS).
 struct ArtifactPill: View {
     let artifact: Artifact
+    var accent: Color = Theme.accent
     let onTap: () -> Void
 
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 8) {
                 Image(systemName: artifact.kind.iconName)
-                    .font(Theme.Typography.font(.caption))
-                    .foregroundStyle(Theme.accent)
+                    .font(Theme.Typography.font(.callout))
+                    .foregroundStyle(accent)
                 Text(artifact.name)
-                    .font(Theme.Typography.font(.caption).weight(.medium))
+                    .font(Theme.Typography.font(.callout).weight(.medium))
+                    .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Text(sizeString)
@@ -359,11 +363,18 @@ struct ArtifactPill: View {
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 0)
                 Image(systemName: "arrow.up.forward.square")
-                    .font(Theme.Typography.font(.caption))
-                    .foregroundStyle(.secondary)
+                    .font(Theme.Typography.font(.callout))
+                    .foregroundStyle(accent)
             }
             .padding(10)
-            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .background(
+                accent.opacity(0.08),
+                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(accent.opacity(0.35), lineWidth: 1)
+            )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -381,7 +392,10 @@ private struct ArtifactPillLoader: View {
     @Environment(AppEnvironment.self) private var env
     @Query private var artifacts: [Artifact]
 
-    init(sourceToolCallID: String) {
+    let accent: Color
+
+    init(sourceToolCallID: String, accent: Color) {
+        self.accent = accent
         _artifacts = Query(
             filter: #Predicate<Artifact> { $0.sourceToolCallID == sourceToolCallID },
             sort: \.createdAt
@@ -390,7 +404,7 @@ private struct ArtifactPillLoader: View {
 
     var body: some View {
         ForEach(artifacts) { artifact in
-            ArtifactPill(artifact: artifact) {
+            ArtifactPill(artifact: artifact, accent: accent) {
                 env.openArtifactID = artifact.persistentModelID
             }
         }

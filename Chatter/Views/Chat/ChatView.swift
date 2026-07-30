@@ -241,7 +241,7 @@ struct ChatView: View {
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
         case .activity(let steps, let live):
-            ActivityGroupView(steps: steps, live: live)
+            ActivityGroupView(steps: steps, live: live, accent: session.agent?.color ?? Theme.accent)
         case .answer(let message):
             VStack(alignment: .leading, spacing: 2) {
                 AssistantMessage(message: message)
