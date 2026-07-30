@@ -15,6 +15,8 @@ enum CodeFileType {
         "java": "java", "kotlin": "kt", "ruby": "rb", "rb": "rb",
         "go": "go", "rust": "rs", "rs": "rs", "php": "php",
         "toml": "toml", "diff": "patch", "patch": "patch",
+        "svg": "svg", "png": "png", "jpg": "jpg", "jpeg": "jpg",
+        "gif": "gif", "webp": "webp",
     ]
 
     static func fileExtension(for language: String?) -> String {
@@ -65,6 +67,11 @@ struct CodeBlockView: View {
     @State private var showExporter = false
     @State private var exportDocument: CodeFileDocument?
     @State private var exportFilename = ""
+    @State private var showCode = false
+
+    /// ```svg fences render inline via SVGView; the header toggle switches
+    /// back to the raw source.
+    private var isSVG: Bool { language?.lowercased() == "svg" }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -75,6 +82,14 @@ struct CodeBlockView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 12)
+                if isSVG {
+                    headerButton(
+                        showCode ? "eye" : "chevron.left.forwardslash.chevron.right",
+                        help: showCode ? "Show preview" : "Show code"
+                    ) {
+                        showCode.toggle()
+                    }
+                }
                 CopyButton(help: "Copy code") { Pasteboard.copy(content) }
                     .foregroundStyle(.tertiary)
                 headerButton("square.and.arrow.down", help: "Save as file") {
@@ -86,11 +101,16 @@ struct CodeBlockView: View {
             .padding(.horizontal, 12)
             .padding(.top, 6)
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                Text(content)
-                    .font(Theme.Typography.font(.mono))
-                    .textSelection(.enabled)
-                    .padding(12)
+            if isSVG && !showCode {
+                SVGView(svg: content)
+                    .padding(8)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    Text(content)
+                        .font(Theme.Typography.font(.mono))
+                        .textSelection(.enabled)
+                        .padding(12)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

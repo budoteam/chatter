@@ -1,13 +1,27 @@
 import SwiftUI
 import SwiftData
+import UniformTypeIdentifiers
 
 /// Renders one artifact: CSV as a table, markdown via the chat renderer,
-/// code as selectable monospace text. Shared by the macOS inspector and the
-/// iOS sheet — both differ only in the container, not the content.
+/// code as selectable monospace text — or inline SVG when the artifact name
+/// ends in .svg. Shared by the macOS inspector and the iOS sheet — both
+/// differ only in the container, not the content.
 struct ArtifactPaneView: View {
     let artifact: Artifact
 
     @Environment(AppEnvironment.self) private var env
+
+    @State private var showExporter = false
+    @State private var exportDocument: CodeFileDocument?
+    @State private var showSource = false
+
+    private var isSVG: Bool {
+        (artifact.name as NSString).pathExtension.lowercased() == "svg"
+    }
+
+    private var exportType: UTType {
+        UTType(filenameExtension: (artifact.name as NSString).pathExtension) ?? .plainText
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -18,6 +32,12 @@ struct ArtifactPaneView: View {
         #if os(macOS)
         .frame(minWidth: 320)
         #endif
+        .fileExporter(
+            isPresented: $showExporter,
+            document: exportDocument,
+            contentType: exportType,
+            defaultFilename: artifact.name
+        ) { _ in }
     }
 
     private var header: some View {
@@ -34,6 +54,25 @@ struct ArtifactPaneView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: 8)
+            if isSVG {
+                Button {
+                    showSource.toggle()
+                } label: {
+                    Image(systemName: showSource ? "eye" : "chevron.left.forwardslash.chevron.right")
+                }
+                .buttonStyle(.plain)
+                .help(showSource ? "Show preview" : "Show source")
+                .accessibilityLabel(Text(showSource ? "Show preview" : "Show source"))
+            }
+            Button {
+                exportDocument = CodeFileDocument(text: artifact.content)
+                showExporter = true
+            } label: {
+                Image(systemName: "square.and.arrow.down")
+            }
+            .buttonStyle(.plain)
+            .help("Save as file")
+            .accessibilityLabel(Text("Save as file"))
             ShareLink(item: artifact.content) {
                 Image(systemName: "square.and.arrow.up")
             }
@@ -68,7 +107,14 @@ struct ArtifactPaneView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         case .code:
-            rawContent(note: nil)
+            if isSVG && !showSource {
+                ScrollView {
+                    SVGView(svg: artifact.content)
+                        .padding(16)
+                }
+            } else {
+                rawContent(note: nil)
+            }
         }
     }
 

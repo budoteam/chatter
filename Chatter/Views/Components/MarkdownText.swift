@@ -66,6 +66,9 @@ struct MarkdownText: View {
 
         case .divider:
             Divider()
+
+        case .image(let alt, let url):
+            InlineImageView(alt: alt, urlString: url)
         }
     }
 
@@ -180,6 +183,7 @@ enum MarkdownBlock {
     case table(header: [String], rows: [[String]])
     case list(ordered: Bool, items: [String])
     case quote(String)
+    case image(alt: String, url: String)
     case divider
 }
 
@@ -266,6 +270,16 @@ enum MarkdownParser {
                 continue
             }
 
+            // Standalone image: a line consisting only of ![alt](url). The
+            // strict whole-line match keeps streaming-safe: a half-typed
+            // `![alt](https://exa` simply falls through to paragraph.
+            if let image = imageLine(line) {
+                flushParagraph()
+                blocks.append(.image(alt: image.alt, url: image.url))
+                i += 1
+                continue
+            }
+
             // Quote
             if line.hasPrefix(">") {
                 flushParagraph()
@@ -328,6 +342,23 @@ enum MarkdownParser {
         let rest = line.dropFirst(digits.count)
         guard rest.hasPrefix(". ") || rest.hasPrefix(") ") else { return nil }
         return String(rest.dropFirst(2))
+    }
+
+    /// Matches `![alt](url)` spanning the whole line. Only http(s) and
+    /// `data:image/…;base64,` URLs are accepted; anything else stays a
+    /// paragraph so inline rendering handles it as before.
+    private static func imageLine(_ line: String) -> (alt: String, url: String)? {
+        guard line.hasPrefix("!["), line.hasSuffix(")") else { return nil }
+        guard let closeBracket = line.firstIndex(of: "]") else { return nil }
+        let alt = String(line[line.index(line.startIndex, offsetBy: 2)..<closeBracket])
+        let rest = line[line.index(after: closeBracket)...]
+        guard rest.hasPrefix("("), rest.hasSuffix(")") else { return nil }
+        let url = String(rest.dropFirst().dropLast())
+        guard !url.isEmpty, !url.contains(" "), !url.contains("\"") else { return nil }
+        let lower = url.lowercased()
+        guard lower.hasPrefix("https://") || lower.hasPrefix("http://")
+                || lower.hasPrefix("data:image/") else { return nil }
+        return (alt, url)
     }
 
     private static func parseTable(_ tableLines: [String]) -> MarkdownBlock? {
