@@ -69,8 +69,15 @@ struct RootView: View {
                 openSettings: { showSettings = true }
             )
             #endif
+            // A "New Chat" request fired while the window was closed (macOS)
+            // bumps the ID before this view exists; the pending flag survives
+            // until here.
+            if env.takePendingNewSession() { startNewSession() }
         }
-        .onChange(of: env.newSessionRequestID) { startNewSession() }
+        .onChange(of: env.newSessionRequestID) {
+            env.takePendingNewSession()
+            startNewSession()
+        }
         .onChange(of: env.hasAPIKey) { Task { await env.refreshModels() } }
         #if os(iOS)
         // iOS suspension silently kills MCP sockets while the clients still

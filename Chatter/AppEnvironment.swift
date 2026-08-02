@@ -43,6 +43,11 @@ final class AppEnvironment {
     /// Bumped by the macOS "New Chat" menu command; observed by `RootView`.
     private(set) var newSessionRequestID = UUID()
 
+    /// Set when "New Chat" was requested while no `RootView` existed to observe
+    /// the `newSessionRequestID` bump (main window closed on macOS); consumed by
+    /// the next appearing `RootView` via `takePendingNewSession()`.
+    private(set) var pendingNewSession = false
+
     /// Bumped on every explicit pick of a screen or chat; observed by
     /// `RootView` to surface the detail column on iPhone. A plain
     /// `onChange(of: mainScreen)` misses re-picking the still-active screen
@@ -79,7 +84,18 @@ final class AppEnvironment {
         #endif
     }
 
-    func requestNewSession() { newSessionRequestID = UUID() }
+    func requestNewSession() {
+        pendingNewSession = true
+        newSessionRequestID = UUID()
+    }
+
+    /// Clears the pending flag; returns whether a request was pending. Called by
+    /// `RootView` both when it observes the ID bump and when it first appears, so
+    /// a request fired while the window was closed is not lost.
+    func takePendingNewSession() -> Bool {
+        defer { pendingNewSession = false }
+        return pendingNewSession
+    }
 
     /// Switches the detail column to a screen (sidebar nav buttons).
     func showScreen(_ screen: MainScreen) {
