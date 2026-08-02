@@ -10,6 +10,10 @@ struct ChatView: View {
     /// Pending deferred scroll — cancelled and replaced on every trigger so
     /// scrolls coalesce instead of stacking overlapping animated transactions.
     @State private var scrollTask: Task<Void, Never>?
+    /// True while an image drag hovers the chat — reveals the top-most drop
+    /// veil, which re-hit-tests above the composer so AppKit's field editor
+    /// can't swallow the drop as a file-link text insertion.
+    @State private var dropTargeted = false
     #if os(iOS)
     /// Message shown in the select-text sheet — SwiftUI Text can't do range
     /// selection on iOS, so this opens the raw text in a UITextView.
@@ -20,6 +24,24 @@ struct ChatView: View {
         VStack(spacing: 0) {
             transcript
             ComposerView(viewModel: viewModel, session: session, onSend: send)
+        }
+        .onDrop(of: [.image], isTargeted: $dropTargeted) { handleImageDrop($0) }
+        .overlay {
+            if dropTargeted && viewModel.supportsVision {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 2, dash: [8, 6]))
+                    }
+                    .overlay {
+                        Label("Drop images to attach", systemImage: "photo.badge.plus")
+                            .font(Theme.Typography.font(.title2))
+                            .foregroundStyle(Color.accentColor)
+                    }
+                    .padding(6)
+                    .onDrop(of: [.image], isTargeted: nil) { handleImageDrop($0) }
+            }
         }
         .navigationTitle(session.title.isEmpty ? "New Chat" : session.title)
         #if os(iOS)
@@ -289,6 +311,17 @@ struct ChatView: View {
                 withTransaction(transaction) { proxy.scrollTo(bottomID, anchor: .bottom) }
             }
         }
+    }
+
+    /// Accepts an image drop anywhere in the chat: rejected when the model
+    /// can't see images (drop falls through), otherwise the providers are
+    /// turned into attachments asynchronously.
+    private func handleImageDrop(_ providers: [NSItemProvider]) -> Bool {
+        guard viewModel.supportsVision else { return false }
+        Task {
+            viewModel.addBase64Images(await ImageAttachmentProcessor.makeBase64JPEGs(from: providers))
+        }
+        return true
     }
 
     private func send() {

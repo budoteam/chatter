@@ -19,10 +19,10 @@ struct ComposerView: View {
     @Query(sort: \Agent.createdAt) private var agents: [Agent]
     @FocusState private var focused: Bool
     @State private var photoItems: [PhotosPickerItem] = []
-    @State private var supportsVision = false
-    /// Set when a picked image was refused because it would push the
-    /// message's attachments past the iCloud-sync size budget.
-    @State private var imageLimitHit = false
+    @State private var showFilePicker = false
+    #if os(macOS)
+    @State private var pasteMonitor: Any?
+    #endif
     #if os(iOS)
     /// Inserting "\n" for Shift+Return also fires the field's onSubmit
     /// (SwiftUI detects submit via newline insertion); this swallows that one.
@@ -34,7 +34,7 @@ struct ComposerView: View {
             if !viewModel.pendingImages.isEmpty {
                 thumbnailStrip
             }
-            if imageLimitHit, !viewModel.pendingImages.isEmpty {
+            if viewModel.imageLimitHit, !viewModel.pendingImages.isEmpty {
                 Text("Some images were skipped — attachments are limited to 700 KB per message so the chat keeps syncing via iCloud.")
                     .font(Theme.Typography.font(.caption))
                     .foregroundStyle(.orange)
@@ -68,6 +68,17 @@ struct ComposerView: View {
                 // keyboards (iPad) Shift+Return inserts a line break instead
                 // of also submitting.
                 .onKeyPress(phases: .down) { press in
+                    // Cmd-V attaches an image clipboard (UIKit text paste
+                    // can't handle images); a text clipboard falls through
+                    // to the field's normal paste. iOS has no onPasteCommand.
+                    if press.modifiers.contains(.command), press.characters == "v",
+                       viewModel.supportsVision, UIPasteboard.general.hasImages {
+                        let providers = UIPasteboard.general.itemProviders
+                        Task {
+                            viewModel.addBase64Images(await ImageAttachmentProcessor.makeBase64JPEGs(from: providers))
+                        }
+                        return .handled
+                    }
                     if press.key == .return, press.modifiers.contains(.shift) {
                         suppressNextSubmit = true
                         insertNewlineAtCursor()
@@ -89,13 +100,14 @@ struct ComposerView: View {
 
             HStack(spacing: 8) {
                 photoButton
+                fileButton
                 agentMenu
                 Spacer(minLength: 8)
                 sendButton
             }
         }
         .task(id: currentModel) {
-            supportsVision = await env.supportsVision(currentModel)
+            viewModel.supportsVision = await env.supportsVision(currentModel)
         }
         // A fresh chat should be ready to type into immediately. ChatView is
         // re-created per session (.id(session.id)), so this fires once per
@@ -105,9 +117,42 @@ struct ComposerView: View {
             guard (session.messages ?? []).isEmpty else { return }
             Task { @MainActor in focused = true }
         }
+        #if os(macOS)
+        .onAppear {
+            let focus = $focused
+            pasteMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                let mods = event.modifierFlags
+                // keyCode 9 = ANSI V — layout-unabhängig (Dvorak & Co.).
+                guard event.keyCode == 9,
+                      mods.contains(.command), !mods.contains(.option), !mods.contains(.control),
+                      focus.wrappedValue, viewModel.supportsVision,
+                      let base64s = ImageAttachmentProcessor.base64JPEGsFromPasteboard()
+                else { return event }
+                viewModel.addBase64Images(base64s)
+                return nil
+            }
+        }
+        .onDisappear {
+            if let pasteMonitor { NSEvent.removeMonitor(pasteMonitor) }
+        }
+        #endif
         .onChange(of: photoItems) { _, items in
             guard !items.isEmpty else { return }
             Task { await loadPickedImages(items) }
+        }
+        #if os(macOS)
+        // Only .image is claimed: text paste and Finder file-copy paste keep
+        // falling through to the text field (a file copy inserts its path).
+        .onPasteCommand(of: [.image]) { providers in
+            guard viewModel.supportsVision else { return }
+            Task {
+                viewModel.addBase64Images(await ImageAttachmentProcessor.makeBase64JPEGs(from: providers))
+            }
+        }
+        #endif
+        .fileImporter(isPresented: $showFilePicker, allowedContentTypes: [.image], allowsMultipleSelection: true) { result in
+            guard case .success(let urls) = result else { return }
+            Task { await loadFileURLs(urls) }
         }
         .padding(.horizontal, 14)
         .padding(.top, 14)
@@ -163,38 +208,64 @@ struct ComposerView: View {
         ) {
             Image(systemName: "photo.on.rectangle")
                 .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(supportsVision ? Color.secondary : Color.secondary.opacity(0.35))
+                .foregroundStyle(viewModel.supportsVision ? Color.secondary : Color.secondary.opacity(0.35))
                 .frame(width: 30, height: 30)
                 .background(Theme.surfaceRaised, in: Circle())
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .disabled(!supportsVision)
-        .help(supportsVision
+        .disabled(!viewModel.supportsVision)
+        .help(viewModel.supportsVision
             ? "Attach images"
             : "This model doesn’t support images")
         // Icon-only button: .help is no VoiceOver label.
-        .accessibilityLabel(Text(supportsVision
+        .accessibilityLabel(Text(viewModel.supportsVision
             ? "Attach images"
             : "This model doesn’t support images"))
     }
 
-    private func loadPickedImages(_ items: [PhotosPickerItem]) async {
-        var skipped = false
-        for item in items {
-            guard let data = try? await item.loadTransferable(type: Data.self),
-                  let base64 = ImageAttachmentProcessor.makeBase64JPEG(from: data) else { continue }
-            // CloudKit rejects records over ~1 MB of inline data — keep the
-            // message's attachments under budget instead of stalling sync.
-            let used = viewModel.pendingImages.reduce(0) { $0 + $1.base64.utf8.count }
-            guard used + base64.utf8.count <= ImageAttachment.maxBase64BytesPerMessage else {
-                skipped = true
-                continue
-            }
-            viewModel.pendingImages.append(ImageAttachment(base64: base64))
+    private var fileButton: some View {
+        Button { showFilePicker = true } label: {
+            Image(systemName: "paperclip")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(viewModel.supportsVision ? Color.secondary : Color.secondary.opacity(0.35))
+                .frame(width: 30, height: 30)
+                .background(Theme.surfaceRaised, in: Circle())
+                .contentShape(Circle())
         }
-        imageLimitHit = skipped
+        .buttonStyle(.plain)
+        .disabled(!viewModel.supportsVision)
+        .help(viewModel.supportsVision
+            ? "Attach image files"
+            : "This model doesn’t support images")
+        .accessibilityLabel(Text(viewModel.supportsVision
+            ? "Attach image files"
+            : "This model doesn’t support images"))
+    }
+
+    private func loadPickedImages(_ items: [PhotosPickerItem]) async {
+        var base64s: [String] = []
+        for item in items {
+            if let data = try? await item.loadTransferable(type: Data.self),
+               let base64 = ImageAttachmentProcessor.makeBase64JPEG(from: data) {
+                base64s.append(base64)
+            }
+        }
+        viewModel.addBase64Images(base64s)
         photoItems = []
+    }
+
+    private func loadFileURLs(_ urls: [URL]) async {
+        var base64s: [String] = []
+        for url in urls {
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            if let data = try? Data(contentsOf: url),
+               let base64 = ImageAttachmentProcessor.makeBase64JPEG(from: data) {
+                base64s.append(base64)
+            }
+        }
+        viewModel.addBase64Images(base64s)
     }
 
     // MARK: - Agent selector (the agent defines the model)

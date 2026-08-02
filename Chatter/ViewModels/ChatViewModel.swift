@@ -9,6 +9,10 @@ final class ChatViewModel {
     var inputText = ""
     var pendingImages: [ImageAttachment] = []
     var errorMessage: String?
+    var supportsVision = false
+    /// Set when an offered image was refused because it would push the message's
+    /// attachments past the iCloud-sync size budget; read by the composer banner.
+    var imageLimitHit = false
 
     /// Whether the composer holds sendable content. Whether a send may start
     /// also depends on the session's turn state, which `AppEnvironment` owns
@@ -48,6 +52,22 @@ final class ChatViewModel {
 
     func stop(env: AppEnvironment, session: ChatSession) {
         env.stopTurn(for: session)
+    }
+
+    /// Appends pre-encoded images under the CloudKit size budget; images that
+    /// would exceed it are skipped and surface the budget hint. Shared sink for
+    /// the photo picker, paste, drop, and the file panel.
+    func addBase64Images(_ base64s: [String]) {
+        var skipped = false
+        for base64 in base64s {
+            let used = pendingImages.reduce(0) { $0 + $1.base64.utf8.count }
+            guard used + base64.utf8.count <= ImageAttachment.maxBase64BytesPerMessage else {
+                skipped = true
+                continue
+            }
+            pendingImages.append(ImageAttachment(base64: base64))
+        }
+        imageLimitHit = skipped
     }
 
     /// "Redo from here": drops everything after the anchoring user message
