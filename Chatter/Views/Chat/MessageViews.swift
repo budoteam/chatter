@@ -102,6 +102,10 @@ struct UserBubble: View {
 
 struct AssistantMessage: View {
     let message: Message
+    /// False when the message's thinking stayed in the preceding activity
+    /// group (final answer of a tool loop) — rendering the trace here too
+    /// would duplicate it.
+    var showsThinking: Bool = true
 
     private var agent: Agent? { message.session?.agent }
     private var thinking: String { message.thinking ?? "" }
@@ -116,8 +120,8 @@ struct AssistantMessage: View {
             .padding(.top, 2)
 
             VStack(alignment: .leading, spacing: 8) {
-                if !thinking.isEmpty {
-                    ThoughtsDisclosure(
+                if showsThinking && !thinking.isEmpty {
+                    ThinkingTraceView(
                         text: thinking,
                         isThinking: message.isStreaming && message.content.isEmpty
                     )
@@ -135,156 +139,148 @@ struct AssistantMessage: View {
     }
 }
 
-// MARK: - Thoughts (reasoning trace, collapsed once done)
+// MARK: - Thoughts (reasoning trace, always visible in a fixed-height box)
 
-struct ThoughtsDisclosure: View {
+/// The reasoning trace: permanently visible in a fixed-height box that
+/// follows the tail while the model thinks. The expand button opens a sheet
+/// with the full text — no collapse/expand animation in the transcript.
+struct ThinkingTraceView: View {
     let text: String
-    /// True while the model is still reasoning — keeps the trace visible live.
+    /// True while the model is still reasoning (streams, no content yet) —
+    /// the box follows the tail; afterwards it stays where it is.
     var isThinking: Bool = false
+    var height: CGFloat = 140
 
-    @State private var expanded = false
-
-    private var isOpen: Bool { expanded || isThinking }
+    @State private var showingFull = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Button { expanded.toggle() } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "brain")
-                        .font(.system(size: 10, weight: .medium))
-                    Text(isThinking ? "Thinking…" : "Thoughts")
-                    Image(systemName: isOpen ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 8, weight: .bold))
+            HStack(spacing: 6) {
+                Image(systemName: "brain")
+                    .font(.system(size: 10, weight: .medium))
+                Text(isThinking ? "Thinking…" : "Thoughts")
+                Spacer(minLength: 0)
+                Button { showingFull = true } label: {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .font(.system(size: 9, weight: .bold))
+                        .frame(width: 20, height: 20)
+                        .contentShape(Rectangle())
                 }
-                .font(Theme.Typography.font(.caption).weight(.medium))
-                .foregroundStyle(.secondary)
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+                .help("Show full trace")
+                .accessibilityLabel(Text("Show full trace"))
             }
-            .buttonStyle(.plain)
+            .font(Theme.Typography.font(.caption).weight(.medium))
+            .foregroundStyle(.secondary)
 
-            if isOpen {
-                Group {
-                    if isThinking {
-                        LiveThinkingTrace(text: text)
-                    } else {
-                        // Capped even when deliberately opened: huge traces
-                        // must not shove the whole chat around either.
-                        ScrollView {
-                            MarkdownText(text: text)
-                                .font(Theme.Typography.font(.callout))
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        .frame(maxHeight: 400)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: 0) {
+                        MarkdownText(text: text)
+                            .font(Theme.Typography.font(.callout))
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Color.clear.frame(height: 1).id("tail")
                     }
                 }
-                .padding(.leading, 12)
-                .overlay(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 1.5)
-                        .fill(Theme.separator)
-                        .frame(width: 3)
-                }
+                .onAppear { if isThinking { pinToTail(proxy) } }
+                .onChange(of: text.count) { if isThinking { pinToTail(proxy) } }
             }
+            .frame(height: height)
         }
-        // Matches scrollToBottom's curve so the auto-collapse (isThinking →
-        // false) and the re-pin scroll compose instead of jumping.
-        .animation(Theme.Motion.Easing.standard, value: isOpen)
-    }
-}
-
-/// The live reasoning trace while the model thinks: a fixed-height window
-/// that auto-follows the tail of the trace. The growing text scrolls by
-/// inside the box instead of pushing the whole chat viewport down on every
-/// streaming flush; the box itself stays scrollable by hand.
-private struct LiveThinkingTrace: View {
-    let text: String
-    var height: CGFloat = 140
-
-    var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                VStack(spacing: 0) {
+        .padding(.leading, 12)
+        .overlay(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 1.5)
+                .fill(Theme.separator)
+                .frame(width: 3)
+        }
+        .sheet(isPresented: $showingFull) {
+            EditorSheet(
+                title: "Thoughts",
+                minWidth: 520, minHeight: 480,
+                trailing: {
+                    Button("Done") { showingFull = false }
+                        .keyboardShortcut(.defaultAction)
+                }
+            ) {
+                ScrollView {
                     MarkdownText(text: text)
-                        .font(Theme.Typography.font(.callout))
-                        .foregroundStyle(.secondary)
+                        .font(Theme.Typography.font(.body))
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    Color.clear.frame(height: 1).id("tail")
+                        .padding(16)
                 }
             }
-            .onAppear { pinToTail(proxy) }
-            .onChange(of: text.count) { pinToTail(proxy) }
         }
-        .frame(height: height)
     }
 
     private func pinToTail(_ proxy: ScrollViewProxy) {
-        // disablesAnimations, not just "no withAnimation" — same reason as
-        // ChatView.scrollToBottom: the scroll must not inherit a transaction
-        // that is already in flight (e.g. the disclosure's own collapse).
+        // disablesAnimations — same reason as ChatView.scrollToBottom: the
+        // scroll must not inherit a transaction already in flight.
         var transaction = Transaction()
         transaction.disablesAnimations = true
         withTransaction(transaction) { proxy.scrollTo("tail", anchor: .bottom) }
     }
 }
 
-// MARK: - Activity group (tool steps of one turn, collapsed once finished)
+// MARK: - Activity group (tool steps of one turn, permanently visible)
 
 /// Wraps the intermediate steps of an agentic turn — assistant snippets, tool
-/// calls, and tool results. Expanded while running; collapses to a one-line
-/// summary as soon as the final answer arrives.
+/// calls, and tool results. The step stream stays visible in a box with a
+/// fixed max height (no collapse, no transcript re-layout per round); the
+/// expand button opens a sheet with the full activity.
 struct ActivityGroupView: View {
     let steps: [Message]
+    /// Thinking of the final answer round — it lived in this stream while
+    /// the turn ran, so it stays here (dimmed, at the end) instead of
+    /// popping out into a second box under the group.
+    var trailingThinking: String? = nil
     let live: Bool
     var accent: Color = Theme.accent
 
-    @State private var expanded = false
+    @State private var showingFull = false
 
     private var toolCallCount: Int {
         steps.filter { $0.role == .tool }.count
     }
 
     /// ToolCall ids of `artifact__create` calls across all steps — their
-    /// pills stay visible even after the group collapses, so the generated
-    /// file remains one tap away.
+    /// pills stay visible below the box, so the generated file remains one
+    /// tap away.
     private var artifactCallIDs: [String] {
         steps.flatMap { $0.toolCalls }
             .filter { $0.name == ArtifactToolProvider.createToolName }
             .map(\.id)
     }
 
-    private var isOpen: Bool { expanded || live }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             VStack(alignment: .leading, spacing: 0) {
-                Button { expanded.toggle() } label: {
-                    HStack(spacing: 8) {
-                        if live {
-                            ProgressView().controlSize(.small)
-                            Text("Working — running tools…")
-                        } else {
-                            Image(systemName: "wrench.and.screwdriver")
-                                .font(.system(size: 10, weight: .medium))
-                            Text(toolCallCount == 1 ? "Used 1 tool" : "Used \(toolCallCount) tools")
-                        }
-                        Spacer(minLength: 0)
-                        if !live {
-                            Image(systemName: expanded ? "chevron.up" : "chevron.down")
-                                .font(.system(size: 9, weight: .bold))
-                        }
+                HStack(spacing: 8) {
+                    if live {
+                        ProgressView().controlSize(.small)
+                        Text("Working — running tools…")
+                    } else {
+                        Image(systemName: "wrench.and.screwdriver")
+                            .font(.system(size: 10, weight: .medium))
+                        Text(toolCallCount == 1 ? "Used 1 tool" : "Used \(toolCallCount) tools")
                     }
-                    .font(Theme.Typography.font(.caption).weight(.medium))
-                    .foregroundStyle(.secondary)
-                    .contentShape(Rectangle())
+                    Spacer(minLength: 0)
+                    Button { showingFull = true } label: {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .font(.system(size: 9, weight: .bold))
+                            .frame(width: 20, height: 20)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Show full activity")
+                    .accessibilityLabel(Text("Show full activity"))
                 }
-                .buttonStyle(.plain)
+                .font(Theme.Typography.font(.caption).weight(.medium))
+                .foregroundStyle(.secondary)
 
-                if isOpen {
-                    VStack(alignment: .leading, spacing: 12) {
-                        ForEach(steps) { StepView(message: $0) }
-                    }
+                ActivityStepsScroll(steps: steps, trailingThinking: trailingThinking, followTail: live)
+                    .frame(maxHeight: 320)
                     .padding(.top, 12)
-                }
             }
             .padding(12)
             .background(
@@ -301,9 +297,70 @@ struct ActivityGroupView: View {
             }
         }
         .padding(.leading, 36)  // aligns with the assistant text column
-        // Matches scrollToBottom's curve so the auto-collapse (live → false)
-        // and the re-pin scroll compose instead of jumping.
-        .animation(Theme.Motion.Easing.standard, value: isOpen)
+        .sheet(isPresented: $showingFull) {
+            EditorSheet(
+                title: "Turn activity",
+                minWidth: 520, minHeight: 480,
+                trailing: {
+                    Button("Done") { showingFull = false }
+                        .keyboardShortcut(.defaultAction)
+                }
+            ) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(steps) { StepView(message: $0) }
+                        if let trailingThinking {
+                            MarkdownText(text: trailingThinking)
+                                .font(Theme.Typography.font(.callout))
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .padding(16)
+                }
+            }
+        }
+    }
+}
+
+/// The always-visible step stream of an activity group: fixed max height so
+/// growth no longer pushes the transcript around; follows the tail while the
+/// turn runs. The full content is one tap away via the group's sheet.
+private struct ActivityStepsScroll: View {
+    let steps: [Message]
+    var trailingThinking: String? = nil
+    let followTail: Bool
+
+    /// Growth of the trailing step (streaming content/thinking, persisted
+    /// tool calls) plus step count — drives the tail re-pin.
+    private var fingerprint: String {
+        let last = steps.last
+        return "\(steps.count)|\(last?.content.count ?? 0)|\(last?.thinking?.count ?? 0)|\(last?.toolCallsJSON?.count ?? 0)"
+    }
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(steps) { StepView(message: $0) }
+                    if let trailingThinking {
+                        MarkdownText(text: trailingThinking)
+                            .font(Theme.Typography.font(.callout))
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    Color.clear.frame(height: 1).id("tail")
+                }
+            }
+            .onAppear { if followTail { pinToTail(proxy) } }
+            .onChange(of: fingerprint) { if followTail { pinToTail(proxy) } }
+        }
+    }
+
+    private func pinToTail(_ proxy: ScrollViewProxy) {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) { proxy.scrollTo("tail", anchor: .bottom) }
     }
 }
 
@@ -315,11 +372,13 @@ private struct StepView: View {
         switch message.role {
         case .assistant:
             VStack(alignment: .leading, spacing: 8) {
+                // Thinking runs inline, dimmed, in the step stream (omp
+                // style) — no nested scroll box inside the 320pt group box.
                 if let thinking = message.thinking, !thinking.isEmpty {
-                    ThoughtsDisclosure(
-                        text: thinking,
-                        isThinking: message.isStreaming && message.content.isEmpty
-                    )
+                    MarkdownText(text: thinking)
+                        .font(Theme.Typography.font(.callout))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 if !message.content.isEmpty {
                     MarkdownText(text: message.content)
@@ -509,5 +568,28 @@ struct ToolResultCard: View {
 
     private var displayName: String {
         "Result: " + (message.toolName ?? "tool").replacingOccurrences(of: "__", with: " › ")
+    }
+}
+
+// MARK: - Turn phase status (e.g. vision describe before the first token)
+
+/// Status row for engine phases that produce no assistant message yet —
+/// without it a long vision describe looks like the app hung.
+struct TurnPhaseRow: View {
+    let phase: ChatEngine.TurnPhase
+
+    var body: some View {
+        switch phase {
+        case .describingImages(let model, let current, let total):
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text(total > 1
+                    ? "Describing attached images with \(model) (\(current)/\(total))…"
+                    : "Describing attached images with \(model)…")
+            }
+            .font(Theme.Typography.font(.caption).weight(.medium))
+            .foregroundStyle(.secondary)
+            .padding(.leading, 36)  // assistant column, same as ActivityGroupView
+        }
     }
 }

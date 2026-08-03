@@ -304,6 +304,45 @@ final class ChatEngineTests: XCTestCase {
         XCTAssertEqual(session.orderedMessages.last?.content, "answer")
     }
 
+    /// The invisible describe phase is exposed via `turnPhase`: set while the
+    /// describe streams, cleared (defer) before the main turn starts.
+    func testVisionFallbackExposesDescribingPhase() async throws {
+        let context = try makeContext()
+        let (agent, session) = makeSession(in: context)
+        let ollama = MockOllamaService()
+        ollama.capabilities = [
+            "test-model": ["completion"],
+            "vision-cloud": ["completion", "vision"]
+        ]
+        AppSettings.visionModel = "vision-cloud"
+        let engine = ChatEngine(ollama: ollama, mcp: MockMCPClient(), knowledge: FakeKnowledge(), artifacts: ArtifactToolProvider())
+        ollama.makeStream = { index, _ in
+            // streamChat is non-async and the engine is @MainActor, so this
+            // closure runs synchronously on the MainActor.
+            MainActor.assumeIsolated {
+                if index == 0 {
+                    XCTAssertEqual(
+                        engine.turnPhase[session.id],
+                        .describingImages(model: "vision-cloud", current: 1, total: 1)
+                    )
+                } else {
+                    XCTAssertNil(engine.turnPhase[session.id], "defer cleared the phase before the main turn")
+                }
+            }
+            return index == 0
+                ? self.stream(of: [.delta("A red square."), .done(reason: "stop")])
+                : self.stream(of: [.delta("answer"), .done(reason: "stop")])
+        }
+
+        try await engine.send(
+            text: "what is this?",
+            images: [ImageAttachment(base64: "aW1n")],
+            session: session, agent: agent, context: context
+        )
+
+        XCTAssertNil(engine.turnPhase[session.id])
+    }
+
     /// Vision-capable chat model: images go directly to the model; the
     /// configured fallback is not used and no description is persisted.
     func testVisionCapableModelReceivesImagesDirectly() async throws {

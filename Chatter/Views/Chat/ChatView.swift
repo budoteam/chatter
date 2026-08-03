@@ -127,6 +127,9 @@ struct ChatView: View {
                             transcriptItemView(item)
                                 .id(item.id)
                         }
+                        if let phase = env.engine.turnPhase[session.id] {
+                            TurnPhaseRow(phase: phase)
+                        }
                         Color.clear.frame(height: 1).id(bottomID)
                     }
                     .padding(.horizontal, Theme.Spacing.lg)
@@ -148,6 +151,7 @@ struct ChatView: View {
                 // transition — the tool cards flash, flicker, and overlap.
                 .onChange(of: (session.messages ?? []).count) { scrollToBottom(proxy, animated: false) }
                 .onChange(of: env.isSending(session)) { scrollToBottom(proxy, animated: false) }
+                .onChange(of: env.engine.turnPhase[session.id]) { scrollToBottom(proxy, animated: false) }
                 .onAppear { scrollToBottom(proxy, animated: false) }
             }
         }
@@ -169,17 +173,19 @@ struct ChatView: View {
     /// One renderable unit of the transcript: user turns and final answers
     /// stay standalone; the intermediate steps of an agentic turn (tool calls,
     /// tool results, interstitial assistant text) are grouped into a single
-    /// collapsible activity item.
-    private enum TranscriptItem: Identifiable {
+    /// activity item. A final answer after such a turn leaves its thinking in
+    /// the group (`trailingThinking`) — it lived there while streaming — and
+    /// renders only its answer text (`showsThinking == false`).
+    enum TranscriptItem: Identifiable {
         case user(Message)
-        case activity([Message], live: Bool)
-        case answer(Message)
+        case activity([Message], trailingThinking: String?, live: Bool)
+        case answer(Message, showsThinking: Bool)
 
         var id: String {
             switch self {
             case .user(let m): return "user-\(m.id.uuidString)"
-            case .activity(let steps, _): return "activity-\(steps.first?.id.uuidString ?? "0")"
-            case .answer(let m): return "answer-\(m.id.uuidString)"
+            case .activity(let steps, _, _): return "activity-\(steps.first?.id.uuidString ?? "0")"
+            case .answer(let m, _): return "answer-\(m.id.uuidString)"
             }
         }
     }
@@ -218,13 +224,13 @@ struct ChatView: View {
         return transcriptCache.items
     }
 
-    private static func groupTranscript(messages: [Message], live: Bool) -> [TranscriptItem] {
+    static func groupTranscript(messages: [Message], live: Bool) -> [TranscriptItem] {
         var items: [TranscriptItem] = []
         var steps: [Message] = []
 
-        func flushSteps(live: Bool = false) {
+        func flushSteps(live: Bool = false, trailingThinking: String? = nil) {
             guard !steps.isEmpty else { return }
-            items.append(.activity(steps, live: live))
+            items.append(.activity(steps, trailingThinking: trailingThinking, live: live))
             steps = []
         }
 
@@ -241,9 +247,26 @@ struct ChatView: View {
                 // Cheap nil check instead of decoding the tool-call JSON on
                 // every render (this runs per streamed UI update).
                 if message.toolCallsJSON == nil {
-                    // No tool calls → this is (or is becoming) the final answer.
-                    flushSteps()
-                    items.append(.answer(message))
+                    // Mid-tool-loop is a streaming round not yet known to be the final
+                    // answer (tool calls persist only when the stream finishes). While
+                    // earlier rounds already produced steps, render it as a step so the
+                    // whole loop stays ONE stable activity group — grouping it as
+                    // `.answer` would swap answer ↔ activity (and re-animate) every round.
+                    // With no prior steps it's a plain first-round answer.
+                    if message.isStreaming && !steps.isEmpty {
+                        steps.append(message)
+                    } else if !steps.isEmpty, let thinking = message.thinking, !thinking.isEmpty {
+                        // Final answer after a tool loop: its thinking stays
+                        // with the activity stream (it rendered inside the
+                        // group while streaming) — only the answer text moves
+                        // out into full color. No second box, no end-of-turn
+                        // layout jump.
+                        flushSteps(trailingThinking: thinking)
+                        items.append(.answer(message, showsThinking: false))
+                    } else {
+                        flushSteps()
+                        items.append(.answer(message, showsThinking: true))
+                    }
                 } else {
                     steps.append(message)
                 }
@@ -262,11 +285,16 @@ struct ChatView: View {
                 actionBar(for: message)
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
-        case .activity(let steps, let live):
-            ActivityGroupView(steps: steps, live: live, accent: session.agent?.color ?? Theme.accent)
-        case .answer(let message):
+        case .activity(let steps, let trailingThinking, let live):
+            ActivityGroupView(
+                steps: steps,
+                trailingThinking: trailingThinking,
+                live: live,
+                accent: session.agent?.color ?? Theme.accent
+            )
+        case .answer(let message, let showsThinking):
             VStack(alignment: .leading, spacing: 2) {
-                AssistantMessage(message: message)
+                AssistantMessage(message: message, showsThinking: showsThinking)
                 if !message.isStreaming {
                     // Indented past the agent badge so it aligns with the text.
                     actionBar(for: message).padding(.leading, 36)

@@ -7,6 +7,7 @@ import SwiftData
 /// rounds a last round is streamed without offering tools, so the turn
 /// always ends in a text answer instead of dropping silently.
 @MainActor
+@Observable
 final class ChatEngine {
     private let ollama: OllamaServiceProtocol
     private let mcp: MCPClientProtocol
@@ -16,6 +17,16 @@ final class ChatEngine {
     private let memory = MemoryToolProvider()
     private let skills = SkillToolProvider()
     private let maxToolIterations = 42
+
+    /// Where a running turn spends its time before the first assistant token
+    /// exists — read by the chat view to show a status row instead of looking
+    /// dead. Currently only the vision fallback has such an invisible phase.
+    enum TurnPhase: Equatable {
+        case describingImages(model: String, current: Int, total: Int)
+    }
+
+    /// Live phase per session id; set and cleared by `runTurns`.
+    private(set) var turnPhase: [UUID: TurnPhase] = [:]
 
     init(ollama: OllamaServiceProtocol, mcp: MCPClientProtocol, knowledge: KnowledgeToolProviding, artifacts: ArtifactToolProvider) {
         self.ollama = ollama
@@ -156,36 +167,47 @@ final class ChatEngine {
         if !modelIsVision {
             let visionModel = AppSettings.visionModel
             if !visionModel.isEmpty {
-                for message in session.orderedMessages
-                where message.role == .user && !message.imageAttachments.isEmpty && message.imageNote.isEmpty {
-                    let description: String
-                    do {
-                        description = try await ollama.complete(
-                            model: visionModel,
-                            messages: [OllamaChatMessage(
-                                role: "user",
-                                content: Self.visionDescribePrompt,
-                                images: message.imageAttachments.map(\.base64)
-                            )]
-                        )
-                    } catch is CancellationError {
-                        throw CancellationError()
-                    } catch {
-                        throw EngineError.visionFallbackFailed(error.localizedDescription)
-                    }
-                    // complete() returns partial text on cancellation instead of
-                    // throwing — never persist a truncated description.
-                    try Task.checkCancellation()
-                    guard !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                        throw EngineError.visionFallbackFailed("empty description")
-                    }
-                    message.imageNote = """
-                    [The attached image(s) were analyzed by the vision model "\(visionModel)":
-                    \(description)
-                    Base your answer on this description; you cannot see the image(s) directly.]
-                    """
+                let pending = session.orderedMessages.filter {
+                    $0.role == .user && !$0.imageAttachments.isEmpty && $0.imageNote.isEmpty
                 }
-                context.saveOrLog()
+                if !pending.isEmpty {
+                    // defer, damit die Phase auch bei visionFallbackFailed/Cancel
+                    // nie hängen bleibt; sie endet, sobald der Hauptturn startet
+                    // (dessen Streaming-UI dann den Status ablöst).
+                    defer { turnPhase[session.id] = nil }
+                    for (index, message) in pending.enumerated() {
+                        turnPhase[session.id] = .describingImages(
+                            model: visionModel, current: index + 1, total: pending.count
+                        )
+                        let description: String
+                        do {
+                            description = try await ollama.complete(
+                                model: visionModel,
+                                messages: [OllamaChatMessage(
+                                    role: "user",
+                                    content: Self.visionDescribePrompt,
+                                    images: message.imageAttachments.map(\.base64)
+                                )]
+                            )
+                        } catch is CancellationError {
+                            throw CancellationError()
+                        } catch {
+                            throw EngineError.visionFallbackFailed(error.localizedDescription)
+                        }
+                        // complete() returns partial text on cancellation instead of
+                        // throwing — never persist a truncated description.
+                        try Task.checkCancellation()
+                        guard !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                            throw EngineError.visionFallbackFailed("empty description")
+                        }
+                        message.imageNote = """
+                        [The attached image(s) were analyzed by the vision model "\(visionModel)":
+                        \(description)
+                        Base your answer on this description; you cannot see the image(s) directly.]
+                        """
+                    }
+                    context.saveOrLog()
+                }
             }
         }
 

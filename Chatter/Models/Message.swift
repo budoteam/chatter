@@ -24,7 +24,7 @@ final class Message {
     var attachmentsJSON: String?
     /// For `tool` role messages: which tool produced this result.
     var toolName: String?
-    /// Reasoning trace from thinking models (shown collapsed in the UI).
+    /// Reasoning trace from thinking models (shown dimmed in the UI).
     var thinking: String?
     /// Textual description of the image attachments, produced once by the global
     /// vision fallback model when the chat model itself can't process images
