@@ -27,9 +27,12 @@ final class ChatEngine {
 
     enum EngineError: LocalizedError {
         case noModel
+        case visionFallbackFailed(String)
         var errorDescription: String? {
             switch self {
             case .noModel: return "No model selected. Pick a model for this agent in its settings."
+            case .visionFallbackFailed(let reason):
+                return "The vision model could not describe the attached image(s): \(reason)"
             }
         }
     }
@@ -137,6 +140,55 @@ final class ChatEngine {
             ? memory.systemPromptSection(agentID: agent?.id, context: context)
             : nil
 
+        // Vision fallback: if the chat model can't process images, the global
+        // vision model describes every not-yet-described image message once. The
+        // description persists on the message (imageNote) and is inlined as text
+        // by toOllama, so it survives tool-loop rebuilds and regenerate.
+        // modelIsVision only matters for messages carrying images, and the
+        // capability check is an uncached /api/show round-trip — skip it
+        // entirely for text-only turns.
+        let modelIsVision: Bool
+        if session.orderedMessages.contains(where: { !$0.imageAttachments.isEmpty }) {
+            modelIsVision = await isVisionCapable(model)
+        } else {
+            modelIsVision = true
+        }
+        if !modelIsVision {
+            let visionModel = AppSettings.visionModel
+            if !visionModel.isEmpty {
+                for message in session.orderedMessages
+                where message.role == .user && !message.imageAttachments.isEmpty && message.imageNote.isEmpty {
+                    let description: String
+                    do {
+                        description = try await ollama.complete(
+                            model: visionModel,
+                            messages: [OllamaChatMessage(
+                                role: "user",
+                                content: Self.visionDescribePrompt,
+                                images: message.imageAttachments.map(\.base64)
+                            )]
+                        )
+                    } catch is CancellationError {
+                        throw CancellationError()
+                    } catch {
+                        throw EngineError.visionFallbackFailed(error.localizedDescription)
+                    }
+                    // complete() returns partial text on cancellation instead of
+                    // throwing — never persist a truncated description.
+                    try Task.checkCancellation()
+                    guard !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                        throw EngineError.visionFallbackFailed("empty description")
+                    }
+                    message.imageNote = """
+                    [The attached image(s) were analyzed by the vision model "\(visionModel)":
+                    \(description)
+                    Base your answer on this description; you cannot see the image(s) directly.]
+                    """
+                }
+                context.saveOrLog()
+            }
+        }
+
         var iteration = 0
         while true {
             iteration += 1
@@ -161,7 +213,7 @@ final class ChatEngine {
                     )
                 )
             ]
-            msgs.append(contentsOf: session.orderedMessages.map(Self.toOllama))
+            msgs.append(contentsOf: session.orderedMessages.map { Self.toOllama($0, includeImages: modelIsVision) })
 
             // Live assistant message the view streams into.
             let assistant = Message(
@@ -333,6 +385,21 @@ final class ChatEngine {
         return formatter
     }()
 
+    /// Prompt for the one-shot vision description call (fallback path).
+    private static let visionDescribePrompt = """
+    Describe the attached image(s) precisely and completely: quote visible text, \
+    name objects, people, layout, diagrams and their data. With several images, \
+    answer per image as "Image 1: …", "Image 2: …". No commentary about yourself.
+    """
+
+    /// Best-effort `/api/show` capability check; any failure means "no vision"
+    /// so the fallback describes the images instead of sending them to a model
+    /// that would ignore them.
+    private func isVisionCapable(_ model: String) async -> Bool {
+        let caps = (try? await ollama.modelCapabilities(model: model)) ?? []
+        return caps.contains { $0.lowercased() == "vision" }
+    }
+
     /// The agent's system prompt plus its knowledge overview, skill index and
     /// memory listing, always ending with the current date & time.
     private static func systemPrompt(
@@ -367,7 +434,7 @@ final class ChatEngine {
         session.title = String(text.prefix(48))
     }
 
-    private static func toOllama(_ m: Message) -> OllamaChatMessage {
+    private static func toOllama(_ m: Message, includeImages: Bool) -> OllamaChatMessage {
         switch m.role {
         case .assistant:
             let calls = m.toolCalls.map {
@@ -382,9 +449,14 @@ final class ChatEngine {
         case .system:
             return OllamaChatMessage(role: "system", content: m.content)
         case .user:
-            let images = m.imageAttachments.map(\.base64)
+            // With a fallback description and a non-vision model, the description
+            // text goes in place of the images; without a description keep today's
+            // passthrough (images attached, model may ignore them).
+            let substitute = !includeImages && !m.imageNote.isEmpty
+            let images = substitute ? [] : m.imageAttachments.map(\.base64)
+            let content = substitute ? m.content + "\n\n" + m.imageNote : m.content
             return OllamaChatMessage(
-                role: "user", content: m.content,
+                role: "user", content: content,
                 images: images.isEmpty ? nil : images
             )
         }

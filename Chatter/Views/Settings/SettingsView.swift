@@ -17,6 +17,7 @@ struct SettingsView: View {
     var body: some View {
         Form {
             apiKeySection
+            visionSection
             mcpSection
             syncSection
             aboutSection
@@ -75,6 +76,35 @@ struct SettingsView: View {
             Text("Ollama Cloud")
         } footer: {
             Text("Create a key at ollama.com → Settings → API keys. Stored securely in your keychain and synced via iCloud Keychain.")
+        }
+    }
+
+    // MARK: - Vision
+
+    private var visionSection: some View {
+        Section {
+            Picker("Vision model", selection: Binding(
+                get: { env.visionModel },
+                set: { env.visionModel = $0 }
+            )) {
+                Text("None").tag("")
+                // Keep the stored model selectable even if the live list doesn't
+                // (yet) contain it (same pattern as AgentEditorView).
+                if !env.visionModel.isEmpty, !env.models.contains(where: { $0.name == env.visionModel }) {
+                    Text(env.visionModel).tag(env.visionModel)
+                }
+                ForEach(env.models) { model in
+                    Text(model.name).tag(model.name)
+                }
+            }
+            if env.models.isEmpty {
+                Text("No models loaded. Add your API key above.")
+                    .font(Theme.Typography.font(.caption)).foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Vision")
+        } footer: {
+            Text("Describes attached images when the agent's model can't process images itself. The description is sent to the agent's model as text. Stored on this device only.")
         }
     }
 

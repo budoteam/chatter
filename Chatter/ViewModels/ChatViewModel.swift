@@ -9,7 +9,7 @@ final class ChatViewModel {
     var inputText = ""
     var pendingImages: [ImageAttachment] = []
     var errorMessage: String?
-    var supportsVision = false
+    var canAttachImages = false
     /// Set when an offered image was refused because it would push the message's
     /// attachments past the iCloud-sync size budget; read by the composer banner.
     var imageLimitHit = false
@@ -35,11 +35,13 @@ final class ChatViewModel {
             } catch is CancellationError {
                 // User stopped — nothing to surface.
             } catch let error as ChatEngine.EngineError {
-                // Thrown before anything was persisted (e.g. no model
-                // selected) — without this the cleared draft would be gone
-                // entirely. Restore it unless the user typed on meanwhile.
                 self?.errorMessage = error.localizedDescription
-                if let self, self.inputText.isEmpty, self.pendingImages.isEmpty {
+                // Only noModel is thrown before anything was persisted —
+                // without this the cleared draft would be gone entirely.
+                // Later failures (e.g. visionFallbackFailed) leave the user
+                // message in history; restoring the draft would duplicate it
+                // on the next send. Retry then goes through resend/regenerate.
+                if case .noModel = error, let self, self.inputText.isEmpty, self.pendingImages.isEmpty {
                     self.inputText = text
                     self.pendingImages = images
                 }

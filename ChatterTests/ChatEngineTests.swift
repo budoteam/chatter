@@ -11,6 +11,13 @@ final class ChatEngineTests: XCTestCase {
     // return and the first insert would trap inside SwiftData.
     private var container: ModelContainer?
 
+    override func tearDown() {
+        // Global UserDefaults-backed setting; without a reset the vision
+        // fallback tests would bleed into each other and into other suites.
+        AppSettings.visionModel = ""
+        super.tearDown()
+    }
+
     private func makeContext() throws -> ModelContext {
         let container = try ModelContainer(
             for: Agent.self, ChatSession.self, Message.self, Artifact.self,
@@ -46,10 +53,18 @@ final class ChatEngineTests: XCTestCase {
         /// Called per `streamChat` (call index, offered tools); returns the
         /// scripted stream for that round.
         var makeStream: ((Int, [OllamaTool]) -> AsyncThrowingStream<OllamaChatChunk, Error>)?
+        /// Scripted `/api/show` capabilities per model name.
+        var capabilities: [String: [String]] = [:]
         private(set) var callCount = 0
         private(set) var toolsPerCall: [Int] = []
+        private(set) var modelsPerCall: [String] = []
+        private(set) var messagesPerCall: [[OllamaChatMessage]] = []
 
         func listModels() async throws -> [OllamaModel] { [] }
+
+        func modelCapabilities(model: String) async throws -> [String] {
+            capabilities[model] ?? []
+        }
 
         func streamChat(
             model: String,
@@ -61,6 +76,8 @@ final class ChatEngineTests: XCTestCase {
             let index = callCount
             callCount += 1
             toolsPerCall.append(tools.count)
+            modelsPerCall.append(model)
+            messagesPerCall.append(messages)
             guard let makeStream else {
                 return AsyncThrowingStream { $0.finish() }
             }
@@ -249,5 +266,191 @@ final class ChatEngineTests: XCTestCase {
         XCTAssertTrue(ollama.toolsPerCall.prefix(42).allSatisfy { $0 == 2 })
         XCTAssertEqual(ollama.toolsPerCall.last, 0, "final round must offer no tools")
         XCTAssertEqual(session.orderedMessages.last?.content, "Fertig.")
+    }
+
+    /// Non-vision chat model + configured fallback: the vision model describes
+    /// the image once, the description persists on the message and is inlined
+    /// as text into the main turn instead of the images.
+    func testNonVisionModelUsesVisionFallbackForImages() async throws {
+        let context = try makeContext()
+        let (agent, session) = makeSession(in: context)
+        let ollama = MockOllamaService()
+        ollama.capabilities = [
+            "test-model": ["completion"],
+            "vision-cloud": ["completion", "vision"]
+        ]
+        AppSettings.visionModel = "vision-cloud"
+        ollama.makeStream = { index, _ in
+            index == 0
+                ? self.stream(of: [.delta("A red square."), .done(reason: "stop")])
+                : self.stream(of: [.delta("answer"), .done(reason: "stop")])
+        }
+        let engine = ChatEngine(ollama: ollama, mcp: MockMCPClient(), knowledge: FakeKnowledge(), artifacts: ArtifactToolProvider())
+
+        try await engine.send(
+            text: "what is this?",
+            images: [ImageAttachment(base64: "aW1n")],
+            session: session, agent: agent, context: context
+        )
+
+        XCTAssertEqual(ollama.callCount, 2, "one describe call + one main turn")
+        XCTAssertEqual(ollama.modelsPerCall, ["vision-cloud", "test-model"])
+        let sentUser = try XCTUnwrap(ollama.messagesPerCall[1].first { $0.role == "user" })
+        XCTAssertNil(sentUser.images, "non-vision model must not receive the images")
+        XCTAssertTrue(sentUser.content.contains("A red square."))
+        XCTAssertTrue(sentUser.content.contains("what is this?"))
+        let persistedUser = try XCTUnwrap(session.orderedMessages.first { $0.role == .user })
+        XCTAssertTrue(persistedUser.imageNote.contains("A red square."))
+        XCTAssertEqual(session.orderedMessages.last?.content, "answer")
+    }
+
+    /// Vision-capable chat model: images go directly to the model; the
+    /// configured fallback is not used and no description is persisted.
+    func testVisionCapableModelReceivesImagesDirectly() async throws {
+        let context = try makeContext()
+        let (agent, session) = makeSession(in: context)
+        let ollama = MockOllamaService()
+        ollama.capabilities = ["test-model": ["completion", "vision"]]
+        AppSettings.visionModel = "vision-cloud"
+        ollama.makeStream = { _, _ in
+            self.stream(of: [.delta("answer"), .done(reason: "stop")])
+        }
+        let engine = ChatEngine(ollama: ollama, mcp: MockMCPClient(), knowledge: FakeKnowledge(), artifacts: ArtifactToolProvider())
+
+        try await engine.send(
+            text: "what is this?",
+            images: [ImageAttachment(base64: "aW1n")],
+            session: session, agent: agent, context: context
+        )
+
+        XCTAssertEqual(ollama.callCount, 1, "no describe call for a vision-capable model")
+        let sentUser = try XCTUnwrap(ollama.messagesPerCall[0].first { $0.role == "user" })
+        XCTAssertEqual(sentUser.images, ["aW1n"])
+        let persistedUser = try XCTUnwrap(session.orderedMessages.first { $0.role == .user })
+        XCTAssertTrue(persistedUser.imageNote.isEmpty)
+    }
+
+    /// No fallback configured and no model vision: today's passthrough stays
+    /// untouched — images are attached as-is, no description is persisted.
+    func testNonVisionModelWithoutFallbackKeepsPassthrough() async throws {
+        let context = try makeContext()
+        let (agent, session) = makeSession(in: context)
+        let ollama = MockOllamaService()
+        AppSettings.visionModel = ""
+        ollama.makeStream = { _, _ in
+            self.stream(of: [.delta("answer"), .done(reason: "stop")])
+        }
+        let engine = ChatEngine(ollama: ollama, mcp: MockMCPClient(), knowledge: FakeKnowledge(), artifacts: ArtifactToolProvider())
+
+        try await engine.send(
+            text: "what is this?",
+            images: [ImageAttachment(base64: "aW1n")],
+            session: session, agent: agent, context: context
+        )
+
+        XCTAssertEqual(ollama.callCount, 1)
+        let sentUser = try XCTUnwrap(ollama.messagesPerCall[0].first { $0.role == "user" })
+        XCTAssertEqual(sentUser.images, ["aW1n"])
+        let persistedUser = try XCTUnwrap(session.orderedMessages.first { $0.role == .user })
+        XCTAssertTrue(persistedUser.imageNote.isEmpty)
+    }
+
+    /// A failing describe call fails the turn visibly (EngineError) instead of
+    /// silently dropping the images; no truncated description is persisted.
+    func testVisionFallbackFailureSurfaces() async throws {
+        let context = try makeContext()
+        let (agent, session) = makeSession(in: context)
+        let ollama = MockOllamaService()
+        ollama.capabilities = ["test-model": ["completion"]]
+        AppSettings.visionModel = "vision-cloud"
+        ollama.makeStream = { _, _ in
+            AsyncThrowingStream { continuation in
+                continuation.finish(throwing: NSError(domain: "test", code: 1))
+            }
+        }
+        let engine = ChatEngine(ollama: ollama, mcp: MockMCPClient(), knowledge: FakeKnowledge(), artifacts: ArtifactToolProvider())
+
+        do {
+            try await engine.send(
+                text: "what is this?",
+                images: [ImageAttachment(base64: "aW1n")],
+                session: session, agent: agent, context: context
+            )
+            XCTFail("a failing describe call must fail the turn")
+        } catch let error as ChatEngine.EngineError {
+            guard case .visionFallbackFailed = error else {
+                return XCTFail("expected visionFallbackFailed, got \(error)")
+            }
+        }
+
+        let persistedUser = try XCTUnwrap(session.orderedMessages.first { $0.role == .user })
+        XCTAssertTrue(persistedUser.imageNote.isEmpty)
+        XCTAssertNil(session.orderedMessages.first { $0.role == .assistant },
+                     "no assistant turn may start after a failed describe")
+    }
+
+    /// A cancelled describe must surface as CancellationError (user-stop
+    /// semantics), never wrapped into EngineError.
+    func testCancelledDescribeSurfacesAsCancellation() async throws {
+        let context = try makeContext()
+        let (agent, session) = makeSession(in: context)
+        let ollama = MockOllamaService()
+        ollama.capabilities = ["test-model": ["completion"]]
+        AppSettings.visionModel = "vision-cloud"
+        ollama.makeStream = { _, _ in
+            AsyncThrowingStream { continuation in
+                continuation.finish(throwing: CancellationError())
+            }
+        }
+        let engine = ChatEngine(ollama: ollama, mcp: MockMCPClient(), knowledge: FakeKnowledge(), artifacts: ArtifactToolProvider())
+
+        do {
+            try await engine.send(
+                text: "what is this?",
+                images: [ImageAttachment(base64: "aW1n")],
+                session: session, agent: agent, context: context
+            )
+            XCTFail("a cancelled describe must throw")
+        } catch is CancellationError {
+            // expected — must not be wrapped in EngineError
+        } catch {
+            XCTFail("expected CancellationError, got \(error)")
+        }
+
+        let persistedUser = try XCTUnwrap(session.orderedMessages.first { $0.role == .user })
+        XCTAssertTrue(persistedUser.imageNote.isEmpty)
+    }
+
+    /// Regenerate must not re-describe already-described messages: the
+    /// persisted imageNote is reused, only the main turn is streamed again.
+    func testRegenerateSkipsAlreadyDescribedImages() async throws {
+        let context = try makeContext()
+        let (agent, session) = makeSession(in: context)
+        let ollama = MockOllamaService()
+        ollama.capabilities = ["test-model": ["completion"]]
+        AppSettings.visionModel = "vision-cloud"
+        ollama.makeStream = { index, _ in
+            index == 0
+                ? self.stream(of: [.delta("A red square."), .done(reason: "stop")])
+                : self.stream(of: [.delta("answer"), .done(reason: "stop")])
+        }
+        let engine = ChatEngine(ollama: ollama, mcp: MockMCPClient(), knowledge: FakeKnowledge(), artifacts: ArtifactToolProvider())
+
+        try await engine.send(
+            text: "what is this?",
+            images: [ImageAttachment(base64: "aW1n")],
+            session: session, agent: agent, context: context
+        )
+        XCTAssertEqual(ollama.callCount, 2)
+
+        try await engine.regenerate(session: session, agent: agent, context: context)
+
+        XCTAssertEqual(ollama.callCount, 3, "regenerate adds exactly one main turn")
+        XCTAssertEqual(ollama.modelsPerCall, ["vision-cloud", "test-model", "test-model"],
+                       "no second describe call for the persisted imageNote")
+        let sentUser = try XCTUnwrap(ollama.messagesPerCall[2].first { $0.role == "user" })
+        XCTAssertNil(sentUser.images)
+        XCTAssertTrue(sentUser.content.contains("A red square."),
+                      "regenerate still inlines the persisted description")
     }
 }

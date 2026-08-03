@@ -26,6 +26,11 @@ final class Message {
     var toolName: String?
     /// Reasoning trace from thinking models (shown collapsed in the UI).
     var thinking: String?
+    /// Textual description of the image attachments, produced once by the global
+    /// vision fallback model when the chat model itself can't process images
+    /// (empty = none). Sent to the chat model instead of the images; not shown
+    /// in the UI.
+    var imageNote: String = ""
     /// True while tokens are still streaming into `content`.
     var isStreaming: Bool = false
 

@@ -27,7 +27,7 @@ struct ChatView: View {
         }
         .onDrop(of: [.image], isTargeted: $dropTargeted) { handleImageDrop($0) }
         .overlay {
-            if dropTargeted && viewModel.supportsVision {
+            if dropTargeted && viewModel.canAttachImages {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .fill(.ultraThinMaterial)
                     .overlay {
@@ -317,7 +317,7 @@ struct ChatView: View {
     /// can't see images (drop falls through), otherwise the providers are
     /// turned into attachments asynchronously.
     private func handleImageDrop(_ providers: [NSItemProvider]) -> Bool {
-        guard viewModel.supportsVision else { return false }
+        guard viewModel.canAttachImages else { return false }
         Task {
             viewModel.addBase64Images(await ImageAttachmentProcessor.makeBase64JPEGs(from: providers))
         }

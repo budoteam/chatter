@@ -72,7 +72,7 @@ struct ComposerView: View {
                     // can't handle images); a text clipboard falls through
                     // to the field's normal paste. iOS has no onPasteCommand.
                     if press.modifiers.contains(.command), press.characters == "v",
-                       viewModel.supportsVision, UIPasteboard.general.hasImages {
+                       viewModel.canAttachImages, UIPasteboard.general.hasImages {
                         let providers = UIPasteboard.general.itemProviders
                         Task {
                             viewModel.addBase64Images(await ImageAttachmentProcessor.makeBase64JPEGs(from: providers))
@@ -106,8 +106,8 @@ struct ComposerView: View {
                 sendButton
             }
         }
-        .task(id: currentModel) {
-            viewModel.supportsVision = await env.supportsVision(currentModel)
+        .task(id: "\(currentModel)|\(env.visionModel)") {
+            viewModel.canAttachImages = await env.canAttachImages(for: currentModel)
         }
         // A fresh chat should be ready to type into immediately. ChatView is
         // re-created per session (.id(session.id)), so this fires once per
@@ -125,7 +125,7 @@ struct ComposerView: View {
                 // keyCode 9 = ANSI V — layout-unabhängig (Dvorak & Co.).
                 guard event.keyCode == 9,
                       mods.contains(.command), !mods.contains(.option), !mods.contains(.control),
-                      focus.wrappedValue, viewModel.supportsVision,
+                      focus.wrappedValue, viewModel.canAttachImages,
                       let base64s = ImageAttachmentProcessor.base64JPEGsFromPasteboard()
                 else { return event }
                 viewModel.addBase64Images(base64s)
@@ -144,7 +144,7 @@ struct ComposerView: View {
         // Only .image is claimed: text paste and Finder file-copy paste keep
         // falling through to the text field (a file copy inserts its path).
         .onPasteCommand(of: [.image]) { providers in
-            guard viewModel.supportsVision else { return }
+            guard viewModel.canAttachImages else { return }
             Task {
                 viewModel.addBase64Images(await ImageAttachmentProcessor.makeBase64JPEGs(from: providers))
             }
@@ -208,18 +208,18 @@ struct ComposerView: View {
         ) {
             Image(systemName: "photo.on.rectangle")
                 .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(viewModel.supportsVision ? Color.secondary : Color.secondary.opacity(0.35))
+                .foregroundStyle(viewModel.canAttachImages ? Color.secondary : Color.secondary.opacity(0.35))
                 .frame(width: 30, height: 30)
                 .background(Theme.surfaceRaised, in: Circle())
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .disabled(!viewModel.supportsVision)
-        .help(viewModel.supportsVision
+        .disabled(!viewModel.canAttachImages)
+        .help(viewModel.canAttachImages
             ? "Attach images"
             : "This model doesn’t support images")
         // Icon-only button: .help is no VoiceOver label.
-        .accessibilityLabel(Text(viewModel.supportsVision
+        .accessibilityLabel(Text(viewModel.canAttachImages
             ? "Attach images"
             : "This model doesn’t support images"))
     }
@@ -228,17 +228,17 @@ struct ComposerView: View {
         Button { showFilePicker = true } label: {
             Image(systemName: "paperclip")
                 .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(viewModel.supportsVision ? Color.secondary : Color.secondary.opacity(0.35))
+                .foregroundStyle(viewModel.canAttachImages ? Color.secondary : Color.secondary.opacity(0.35))
                 .frame(width: 30, height: 30)
                 .background(Theme.surfaceRaised, in: Circle())
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .disabled(!viewModel.supportsVision)
-        .help(viewModel.supportsVision
+        .disabled(!viewModel.canAttachImages)
+        .help(viewModel.canAttachImages
             ? "Attach image files"
             : "This model doesn’t support images")
-        .accessibilityLabel(Text(viewModel.supportsVision
+        .accessibilityLabel(Text(viewModel.canAttachImages
             ? "Attach image files"
             : "This model doesn’t support images"))
     }

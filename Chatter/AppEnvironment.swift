@@ -33,6 +33,10 @@ final class AppEnvironment {
     var hasAPIKey: Bool = KeychainService.hasAPIKey
     /// Cached `/api/show` capabilities per model name (lowercased set).
     var modelCapabilities: [String: Set<String>] = [:]
+    /// Mirror of `AppSettings.visionModel` for SwiftUI reactivity; writes persist.
+    var visionModel: String = AppSettings.visionModel {
+        didSet { AppSettings.visionModel = visionModel }
+    }
     /// Text to pre-fill the composer of the next opened chat (welcome chips).
     var pendingPrompt: String?
 
@@ -180,5 +184,12 @@ final class AppEnvironment {
     /// Whether `model` supports image input (gates the composer photo button).
     func supportsVision(_ model: String) async -> Bool {
         await supports("vision", model: model)
+    }
+
+    /// Whether images may be attached in a chat running `model`: either the
+    /// model itself reports vision, or the global vision fallback is configured.
+    func canAttachImages(for model: String) async -> Bool {
+        if await supportsVision(model) { return true }
+        return !visionModel.isEmpty
     }
 }
