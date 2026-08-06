@@ -1,3 +1,4 @@
+import CloudKit
 import CoreData
 import Foundation
 
@@ -48,7 +49,7 @@ final class CloudSyncMonitor {
                 startDate: event.startDate,
                 endDate: event.endDate,
                 succeeded: event.succeeded,
-                errorDescription: event.error?.localizedDescription
+                errorDescription: Self.describe(event.error)
             )
             let type = event.type
             Task { @MainActor [weak self] in
@@ -59,6 +60,35 @@ final class CloudSyncMonitor {
 
     deinit {
         if let observer { NotificationCenter.default.removeObserver(observer) }
+    }
+
+    /// CloudKit batch failures surface as `CKError.partialFailure`, whose
+    /// `localizedDescription` ("CKErrorDomain error 2.") hides the real
+    /// per-record errors. Unwrap them so Settings/logs show *why* sync
+    /// actually failed — e.g. a record type missing from the Production
+    /// schema shows up as the nested `unknownItem` / `serverRejectedRequest`
+    /// codes instead of the opaque generic message.
+    private static func describe(_ error: Error?) -> String? {
+        guard let error else { return nil }
+        let nsError = error as NSError
+        guard nsError.domain == CKError.errorDomain,
+              nsError.code == CKError.Code.partialFailure.rawValue,
+              let partials = nsError.userInfo[CKPartialErrorsByItemIDKey] as? [AnyHashable: Any],
+              !partials.isEmpty
+        else { return error.localizedDescription }
+
+        // Group by (domain, code) with counts — a stalled export can carry
+        // one nested error per record, all identical.
+        let counts = partials.values.reduce(into: [String: Int]()) { counts, item in
+            let nested = item as? NSError
+            let key = nested.map { "\($0.domain) error \($0.code)" } ?? "unknown"
+            counts[key, default: 0] += 1
+        }
+        let summary = counts
+            .sorted { $0.key < $1.key }
+            .map { "\($0.key) ×\($0.value)" }
+            .joined(separator: ", ")
+        return "partial failure: \(summary)"
     }
 
     private func apply(type: NSPersistentCloudKitContainer.EventType, status: EventStatus) {
