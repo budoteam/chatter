@@ -11,6 +11,9 @@ final class Agent {
     var systemPrompt: String = ""
     /// Ollama model id, e.g. "qwen3-coder:480b-cloud".
     var modelId: String = ""
+    /// Additional models offered in the chat composer for quick switching.
+    /// The primary model stays `modelId`.
+    var alternateModelIds: [String] = []
     var temperature: Double = 0.7
     var iconSymbol: String = "sparkles"
     var colorHex: String = "6C5CE7"
@@ -39,6 +42,7 @@ final class Agent {
         name: String = "New Agent",
         systemPrompt: String = "",
         modelId: String = "",
+        alternateModelIds: [String] = [],
         temperature: Double = 0.7,
         iconSymbol: String = "sparkles",
         colorHex: String = "6C5CE7",
@@ -54,6 +58,7 @@ final class Agent {
         self.name = name
         self.systemPrompt = systemPrompt
         self.modelId = modelId
+        self.alternateModelIds = alternateModelIds
         self.temperature = temperature
         self.iconSymbol = iconSymbol
         self.colorHex = colorHex
@@ -68,6 +73,12 @@ final class Agent {
     }
 
     var color: Color { Color(hex: colorHex) }
+
+    /// Primary model first, then alternates — what the composer offers.
+    var allModelIds: [String] {
+        var seen = Set<String>()
+        return ([modelId] + alternateModelIds).filter { !$0.isEmpty && seen.insert($0).inserted }
+    }
 
     var thinkingMode: ThinkingMode {
         get { ThinkingMode(rawValue: thinkingModeRaw) ?? .standard }

@@ -96,6 +96,7 @@ struct AgentsScreen: View {
         .contextMenu {
             Button("New Chat") { startChat(agent) }
             Button("Edit…") { editingAgent = agent }
+            Button("Duplicate") { duplicate(agent) }
             if agents.count > 1 {
                 Divider()
                 Button("Delete", role: .destructive) { delete(agent) }
@@ -112,6 +113,28 @@ struct AgentsScreen: View {
     private func startChat(_ agent: Agent) {
         let session = SessionFactory.create(in: context, agent: agent, models: env.models)
         env.openChat(session)
+    }
+
+    private func duplicate(_ agent: Agent) {
+        let copy = Agent(
+            name: agent.name + " Copy",
+            systemPrompt: agent.systemPrompt,
+            modelId: agent.modelId,
+            temperature: agent.temperature,
+            iconSymbol: agent.iconSymbol,
+            colorHex: agent.colorHex,
+            mcpServerIDs: agent.mcpServerIDs,
+            knowledgeBundleIDs: agent.knowledgeBundleIDs,
+            skillIDs: agent.skillIDs,
+            memoryEnabled: agent.memoryEnabled,
+            skillAuthoringEnabled: agent.skillAuthoringEnabled,
+            webAccessEnabled: agent.webAccessEnabled
+            // isDefault deliberately not copied — exactly one default agent.
+        )
+        copy.alternateModelIds = agent.alternateModelIds
+        copy.thinkingMode = agent.thinkingMode
+        context.insert(copy)
+        context.saveOrLog()
     }
 
     private func delete(_ agent: Agent) {

@@ -17,6 +17,7 @@ struct AgentEditorView: View {
     @State private var name = ""
     @State private var systemPrompt = ""
     @State private var modelId = ""
+    @State private var alternateModelIds: Set<String> = []
     @State private var temperature = 0.7
     @State private var iconSymbol = "sparkles"
     @State private var colorHex = "6C5CE7"
@@ -99,6 +100,18 @@ struct AgentEditorView: View {
                     }
                     Slider(value: $temperature, in: 0...1, step: 0.1)
                 }
+            }
+
+            Section {
+                ForEach(env.models) { model in
+                    Toggle(isOn: membership(of: model.name, in: $alternateModelIds)) {
+                        Text(model.name)
+                    }
+                }
+            } header: {
+                Text("Quick-Switch Models")
+            } footer: {
+                Text("Extra models listed in the chat composer for quick switching. The primary model above is always offered.")
             }
 
             Section {
@@ -242,7 +255,7 @@ struct AgentEditorView: View {
         .padding(.vertical, 4)
     }
 
-    private func membership(of id: UUID, in set: Binding<Set<UUID>>) -> Binding<Bool> {
+    private func membership<T: Hashable>(of id: T, in set: Binding<Set<T>>) -> Binding<Bool> {
         Binding(
             get: { set.wrappedValue.contains(id) },
             set: { on in
@@ -259,6 +272,7 @@ struct AgentEditorView: View {
         name = agent.name
         systemPrompt = agent.systemPrompt
         modelId = agent.modelId
+        alternateModelIds = Set(agent.alternateModelIds)
         temperature = agent.temperature
         iconSymbol = agent.iconSymbol
         colorHex = agent.colorHex
@@ -277,6 +291,9 @@ struct AgentEditorView: View {
         target.name = name.trimmingCharacters(in: .whitespaces)
         target.systemPrompt = systemPrompt
         target.modelId = modelId
+        // Stored in env.models order for a stable composer menu; the primary
+        // model is always offered, so it never belongs in the alternate list.
+        target.alternateModelIds = env.models.map(\.name).filter { alternateModelIds.contains($0) && $0 != modelId }
         target.temperature = temperature
         target.iconSymbol = iconSymbol
         target.colorHex = colorHex

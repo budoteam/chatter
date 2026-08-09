@@ -461,6 +461,25 @@ final class ChatEngineTests: XCTestCase {
         XCTAssertTrue(persistedUser.imageNote.isEmpty)
     }
 
+    /// A per-chat model pin (composer quick-switch) beats the agent's model and
+    /// becomes the session snapshot; clearing it falls back to the agent.
+    func testModelOverrideWinsOverAgentModel() async throws {
+        let context = try makeContext()
+        let (agent, session) = makeSession(in: context)
+        session.modelOverride = "override-model"
+        let ollama = MockOllamaService()
+        ollama.makeStream = { _, _ in self.stream(of: [.delta("ok"), .done(reason: "stop")]) }
+        let engine = ChatEngine(ollama: ollama, mcp: MockMCPClient(), knowledge: FakeKnowledge(), artifacts: ArtifactToolProvider())
+
+        try await engine.send(text: "hi", session: session, agent: agent, context: context)
+        XCTAssertEqual(ollama.modelsPerCall, ["override-model"])
+        XCTAssertEqual(session.modelId, "override-model")
+
+        session.modelOverride = ""
+        try await engine.regenerate(session: session, agent: agent, context: context)
+        XCTAssertEqual(ollama.modelsPerCall, ["override-model", "test-model"])
+    }
+
     /// Regenerate must not re-describe already-described messages: the
     /// persisted imageNote is reused, only the main turn is streamed again.
     func testRegenerateSkipsAlreadyDescribedImages() async throws {

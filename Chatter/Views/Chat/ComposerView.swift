@@ -102,6 +102,9 @@ struct ComposerView: View {
                 photoButton
                 fileButton
                 agentMenu
+                if let agent = session.agent, agent.allModelIds.count > 1 {
+                    modelMenu
+                }
                 Spacer(minLength: 8)
                 sendButton
             }
@@ -179,6 +182,7 @@ struct ComposerView: View {
 
     /// The model that will actually run this turn (agent's model, else session).
     private var currentModel: String {
+        if !session.modelOverride.isEmpty { return session.modelOverride }
         if let m = session.agent?.modelId, !m.isEmpty { return m }
         return session.modelId
     }
@@ -304,7 +308,6 @@ struct ComposerView: View {
         }
         .menuStyle(.borderlessButton)
         .buttonStyle(.plain)
-        .frame(maxWidth: 260, alignment: .leading)
     }
 
     private func agentTitle(_ agent: Agent) -> String {
@@ -312,10 +315,50 @@ struct ComposerView: View {
     }
 
     private func select(_ agent: Agent) {
+        session.modelOverride = ""
         session.agent = agent
         if !agent.modelId.isEmpty {
             session.modelId = agent.modelId
         }
+    }
+
+    // MARK: - Model selector (quick-switch within the agent's models)
+
+    private var modelMenu: some View {
+        Menu {
+            ForEach(session.agent?.allModelIds ?? [], id: \.self) { model in
+                Button { selectModel(model) } label: {
+                    if model == currentModel {
+                        Label(model, systemImage: "checkmark")
+                    } else {
+                        Text(model)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "cpu")
+                    .font(.system(size: 9, weight: .semibold))
+                Text(currentModel)
+                    .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .bold))
+            }
+            .font(Theme.Typography.font(.caption).weight(.medium))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(Theme.surfaceRaised, in: Capsule())
+            .contentShape(Capsule())
+        }
+        .menuStyle(.borderlessButton)
+        .buttonStyle(.plain)
+    }
+
+    private func selectModel(_ model: String) {
+        // Choosing the agent's primary model clears the pin instead, so later
+        // agent model edits keep propagating to this chat.
+        session.modelOverride = model == session.agent?.modelId ? "" : model
     }
 
     // MARK: - Send / stop

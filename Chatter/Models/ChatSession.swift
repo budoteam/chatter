@@ -12,6 +12,8 @@ final class ChatSession {
     /// Snapshot of the model id used, so the session is self-describing even if
     /// the agent later changes.
     var modelId: String = ""
+    /// Per-chat model pinned in the composer. Empty follows the agent's model.
+    var modelOverride: String = ""
 
     var agent: Agent?
 

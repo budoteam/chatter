@@ -462,6 +462,7 @@ final class ChatEngine {
     }
 
     private func resolveModel(agent: Agent?, session: ChatSession) -> String {
+        if !session.modelOverride.isEmpty { return session.modelOverride }
         if let m = agent?.modelId, !m.isEmpty { return m }
         return session.modelId
     }
