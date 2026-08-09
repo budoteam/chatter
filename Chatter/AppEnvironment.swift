@@ -146,6 +146,59 @@ final class AppEnvironment {
 
     func refreshAPIKeyState() { hasAPIKey = KeychainService.hasAPIKey }
 
+    // MARK: - Reminder actions
+
+    /// Runs pending reminder actions: reminders whose `actionPrompt` became
+    /// due while the app was closed (or while it sat in the background).
+    /// Called at launch and from the notification delegate (tap). Each entry
+    /// is stamped `actionCompletedAt` before its turn starts, so a crash or a
+    /// second synced device can never double-run it — the stamp is the
+    /// guard, not the outcome.
+    func runDueReminderActions(context: ModelContext) {
+        let now = Date()
+        let descriptor = FetchDescriptor<ReminderEntry>(
+            predicate: #Predicate { !$0.isCompleted && $0.dueDate <= now }
+        )
+        let due = ((try? context.fetch(descriptor)) ?? []).filter {
+            !$0.actionPrompt.isEmpty && $0.actionCompletedAt == nil
+        }
+        guard !due.isEmpty else { return }
+
+        for entry in due {
+            entry.actionCompletedAt = now
+            entry.updatedAt = now
+            context.saveOrLog()
+            // The notification is moot once the action runs.
+            ReminderScheduler.cancel(entry.id)
+
+            guard let agentID = entry.agentID,
+                  let agent = try? context.fetch(
+                      FetchDescriptor<Agent>(predicate: #Predicate { $0.id == agentID })
+                  ).first else {
+                // Agent deleted or reminder without one — nowhere to run it.
+                AppLogger.data.error("Reminder action skipped, agent missing for \(entry.shortID, privacy: .public)")
+                continue
+            }
+
+            let session = ChatSession(title: String(entry.content.prefix(48)), agent: agent)
+            context.insert(session)
+            context.saveOrLog()
+
+            let prompt = entry.actionPrompt
+            runTurn(for: session) { [weak self] in
+                guard let self else { return }
+                do {
+                    try await self.engine.send(text: prompt, session: session, agent: agent, context: context)
+                } catch {
+                    AppLogger.api.error("Reminder action turn failed: \(error.localizedDescription, privacy: .public)")
+                }
+            }
+            // Bring the user to the result (with several due actions, the last
+            // one wins — the others are one sidebar tap away).
+            openChat(session)
+        }
+    }
+
     /// Loads the model list from Ollama Cloud (best-effort).
     func refreshModels() async {
         guard hasAPIKey else {

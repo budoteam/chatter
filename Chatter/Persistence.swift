@@ -29,6 +29,7 @@ enum Persistence {
         KnowledgeBundle.self,
         KnowledgeConcept.self,
         MemoryEntry.self,
+        ReminderEntry.self,
         Skill.self,
     ])
 

@@ -15,6 +15,11 @@ struct ChatterWatchApp: App {
             WatchRootView()
                 .environment(environment)
                 .tint(Theme.accent)
+                .task {
+                    // Schedule this device's notifications for synced reminder
+                    // entries; actions themselves run on iOS/macOS.
+                    await ReminderScheduler.reconcile(context: modelContainer.mainContext)
+                }
         }
         .modelContainer(modelContainer)
     }

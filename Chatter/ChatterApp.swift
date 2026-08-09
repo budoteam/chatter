@@ -55,13 +55,53 @@ private final class MacAppDelegate: NSObject, NSApplicationDelegate {
 }
 #endif
 
+import UserNotifications
+
+/// Notification delegate for reminders: banners also show while the app is in
+/// the foreground, and tapping a notification (like a plain launch, see
+/// `RootView.task`) runs pending reminder actions.
+private final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
+    var onResponse: (() -> Void)?
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        [.banner, .sound]
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse
+    ) async {
+        onResponse?()
+    }
+}
+
 @main
 struct ChatterApp: App {
     /// Shared SwiftData container (CloudKit-backed when the iCloud capability is
     /// available, local-only otherwise). Created once for the app lifetime.
-    let modelContainer: ModelContainer = Persistence.makeContainer()
+    let modelContainer: ModelContainer
 
-    @State private var environment = AppEnvironment()
+    /// Retained here because `UNUserNotificationCenter.delegate` is weak.
+    private let notificationDelegate = NotificationDelegate()
+
+    @State private var environment: AppEnvironment
+
+    init() {
+        let container = Persistence.makeContainer()
+        self.modelContainer = container
+        let environment = AppEnvironment()
+        self._environment = State(initialValue: environment)
+        notificationDelegate.onResponse = {
+            Task { @MainActor in
+                await ReminderScheduler.reconcile(context: container.mainContext)
+                environment.runDueReminderActions(context: container.mainContext)
+            }
+        }
+        UNUserNotificationCenter.current().delegate = notificationDelegate
+    }
 
     #if os(macOS)
     @NSApplicationDelegateAdaptor(MacAppDelegate.self) private var appDelegate

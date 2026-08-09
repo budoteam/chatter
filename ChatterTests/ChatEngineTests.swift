@@ -262,8 +262,9 @@ final class ChatEngineTests: XCTestCase {
 
         XCTAssertEqual(mcp.calls.count, 42, "one tool execution per budgeted round")
         XCTAssertEqual(ollama.callCount, 43, "42 tool rounds + 1 final round")
-        // 2 tools per round: the MCP loop tool + the built-in artifact tool.
-        XCTAssertTrue(ollama.toolsPerCall.prefix(42).allSatisfy { $0 == 2 })
+        // 6 tools per round: the MCP loop tool + the built-in artifact tool +
+        // the four always-on reminder tools.
+        XCTAssertTrue(ollama.toolsPerCall.prefix(42).allSatisfy { $0 == 6 })
         XCTAssertEqual(ollama.toolsPerCall.last, 0, "final round must offer no tools")
         XCTAssertEqual(session.orderedMessages.last?.content, "Fertig.")
     }

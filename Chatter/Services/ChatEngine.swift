@@ -16,6 +16,7 @@ final class ChatEngine {
     private let artifacts: ArtifactToolProvider
     private let memory = MemoryToolProvider()
     private let skills = SkillToolProvider()
+    private let reminders = ReminderToolProvider()
     private let maxToolIterations = 42
 
     /// Where a running turn spends its time before the first assistant token
@@ -129,6 +130,13 @@ final class ChatEngine {
         let skillToolNames = Set(skillTools.map(\.function.name))
         tools += skillTools
 
+        // Built-in reminder tools, always offered: scheduling needs no
+        // per-agent opt-in (unlike memory, reminders never write to the
+        // prompt unprompted — only the listing appears).
+        let reminderTools = reminders.tools()
+        let reminderToolNames = Set(reminderTools.map(\.function.name))
+        tools += reminderTools
+
         // Built-in artifact tool: file output (CSV / markdown / code) that
         // renders in the side panel instead of flooding the chat stream.
         let artifactTools = artifacts.tools()
@@ -150,6 +158,7 @@ final class ChatEngine {
         let memorySection = memoryEnabled
             ? memory.systemPromptSection(agentID: agent?.id, context: context)
             : nil
+        let remindersSection = reminders.systemPromptSection(agentID: agent?.id, context: context)
 
         // Vision fallback: if the chat model can't process images, the global
         // vision model describes every not-yet-described image message once. The
@@ -231,6 +240,7 @@ final class ChatEngine {
                         knowledgeSection: knowledgeSection,
                         skillsSection: skillsSection,
                         memorySection: memorySection,
+                        remindersSection: remindersSection,
                         artifactSection: ArtifactToolProvider.systemPromptSection
                     )
                 )
@@ -366,6 +376,11 @@ final class ChatEngine {
                             namespacedName: name, argumentsJSON: argsJSON,
                             agent: agent, context: context
                         )
+                    } else if reminderToolNames.contains(name) {
+                        result = try reminders.call(
+                            namespacedName: name, argumentsJSON: argsJSON,
+                            agentID: agent?.id, context: context
+                        )
                     } else if artifactToolNames.contains(name) {
                         // `answered` indexes the current call in the persisted
                         // array, linking the artifact to its ToolCall for the
@@ -422,13 +437,15 @@ final class ChatEngine {
         return caps.contains { $0.lowercased() == "vision" }
     }
 
-    /// The agent's system prompt plus its knowledge overview, skill index and
-    /// memory listing, always ending with the current date & time.
+    /// The agent's system prompt plus its knowledge overview, skill index,
+    /// memory listing and reminder listing, always ending with the current
+    /// date & time.
     private static func systemPrompt(
         for agent: Agent?,
         knowledgeSection: String?,
         skillsSection: String?,
         memorySection: String?,
+        remindersSection: String?,
         artifactSection: String?
     ) -> String {
         let timestamp = "Current Date and Time: \(timestampFormatter.string(from: Date()))"
@@ -438,6 +455,7 @@ final class ChatEngine {
         if let knowledgeSection { parts.append(knowledgeSection) }
         if let skillsSection { parts.append(skillsSection) }
         if let memorySection { parts.append(memorySection) }
+        if let remindersSection { parts.append(remindersSection) }
         if let artifactSection { parts.append(artifactSection) }
         parts.append(timestamp)
         return parts.joined(separator: "\n\n")

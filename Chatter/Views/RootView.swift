@@ -58,6 +58,11 @@ struct RootView: View {
         }
         .task {
             resetStaleStreamingFlags()
+            // Reminders: make this device schedule notifications for synced
+            // entries, then run any action reminders that came due while the
+            // app was closed.
+            await ReminderScheduler.reconcile(context: context)
+            env.runDueReminderActions(context: context)
             await env.refreshModels()
             backfillAgentModels()
             await env.mcp.syncConnections(configs: allServers())
