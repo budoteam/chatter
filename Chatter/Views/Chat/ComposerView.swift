@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import PhotosUI
+import UniformTypeIdentifiers
 #if os(macOS)
 import AppKit
 #else
@@ -101,6 +102,15 @@ struct ComposerView: View {
             HStack(spacing: 8) {
                 photoButton
                 fileButton
+                #if os(iOS)
+                if viewModel.canAttachImages {
+                    PasteImageControl { providers in
+                        Task {
+                            viewModel.addBase64Images(await ImageAttachmentProcessor.makeBase64JPEGs(from: providers))
+                        }
+                    }
+                }
+                #endif
                 agentMenu
                 if let agent = session.agent, agent.allModelIds.count > 1 {
                     modelMenu
@@ -429,6 +439,43 @@ private extension UIResponder {
 
     @MainActor @objc private func captureFirst() {
         UIResponder._currentFirst = self
+    }
+}
+
+/// System paste button (iOS 16+): reads the clipboard WITHOUT the
+/// paste-permission alert, because the tap goes through Apple's own UI.
+/// It tracks the pasteboard itself and is enabled only when the clipboard
+/// holds content matching the coordinator's `pasteConfiguration` (images).
+private struct PasteImageControl: UIViewRepresentable {
+    /// Called with the clipboard's item providers on tap.
+    let onPaste: ([NSItemProvider]) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(onPaste: onPaste) }
+
+    func makeUIView(context: Context) -> UIPasteControl {
+        let config = UIPasteControl.Configuration()
+        config.displayMode = .iconOnly
+        config.cornerStyle = .capsule
+        config.baseBackgroundColor = UIColor(Theme.surfaceRaised)
+        config.baseForegroundColor = UIColor(Color.secondary)
+        let control = UIPasteControl(configuration: config)
+        control.target = context.coordinator
+        return control
+    }
+
+    func updateUIView(_ control: UIPasteControl, context: Context) {
+        context.coordinator.onPaste = onPaste
+    }
+
+    final class Coordinator: NSObject, UIPasteConfigurationSupporting {
+        var onPaste: ([NSItemProvider]) -> Void
+
+        init(onPaste: @escaping ([NSItemProvider]) -> Void) { self.onPaste = onPaste }
+
+        var pasteConfiguration: UIPasteConfiguration? =
+            UIPasteConfiguration(acceptableTypeIdentifiers: [UTType.image.identifier])
+
+        func paste(itemProviders: [NSItemProvider]) { onPaste(itemProviders) }
     }
 }
 #endif
