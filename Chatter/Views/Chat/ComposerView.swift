@@ -18,16 +18,14 @@ struct ComposerView: View {
 
     @Environment(AppEnvironment.self) private var env
     @Query(sort: \Agent.createdAt) private var agents: [Agent]
-    @FocusState private var focused: Bool
     @State private var photoItems: [PhotosPickerItem] = []
     @State private var showFilePicker = false
     #if os(macOS)
+    @FocusState private var focused: Bool
     @State private var pasteMonitor: Any?
-    #endif
-    #if os(iOS)
-    /// Inserting "\n" for Shift+Return also fires the field's onSubmit
-    /// (SwiftUI detects submit via newline insertion); this swallows that one.
-    @State private var suppressNextSubmit = false
+    #else
+    /// First-responder state of the UIKit input field (see ComposerTextField).
+    @State private var focused = false
     #endif
 
     var body: some View {
@@ -42,12 +40,12 @@ struct ComposerView: View {
                     .padding(.horizontal, 4)
             }
 
+            #if os(macOS)
             TextField(placeholder, text: $viewModel.inputText, axis: .vertical)
                 .textFieldStyle(.plain)
                 .lineLimit(1...8)
                 .focused($focused)
                 .padding(.horizontal, 4)
-                #if os(macOS)
                 // Return sends; Shift+Return inserts a line break at the cursor.
                 // Plain .ignored doesn't work for Shift+Return (the field editor
                 // treats it as submit/select-all instead of a newline), so we
@@ -64,53 +62,23 @@ struct ComposerView: View {
                     performSend()
                     return .handled
                 }
-                #else
-                // Software-keyboard Return submits (onSubmit); on hardware
-                // keyboards (iPad) Shift+Return inserts a line break instead
-                // of also submitting.
-                .onKeyPress(phases: .down) { press in
-                    // Cmd-V attaches an image clipboard (UIKit text paste
-                    // can't handle images); a text clipboard falls through
-                    // to the field's normal paste. iOS has no onPasteCommand.
-                    if press.modifiers.contains(.command), press.characters == "v",
-                       viewModel.canAttachImages, UIPasteboard.general.hasImages {
-                        let providers = UIPasteboard.general.itemProviders
-                        Task {
-                            viewModel.addBase64Images(await ImageAttachmentProcessor.makeBase64JPEGs(from: providers))
-                        }
-                        return .handled
-                    }
-                    if press.key == .return, press.modifiers.contains(.shift) {
-                        suppressNextSubmit = true
-                        insertNewlineAtCursor()
-                        return .handled
-                    }
-                    // Any other key invalidates a stale suppress so a real
-                    // Return is never swallowed.
-                    suppressNextSubmit = false
-                    return .ignored
-                }
-                .onSubmit {
-                    if suppressNextSubmit {
-                        suppressNextSubmit = false
-                    } else {
-                        performSend()
-                    }
-                }
-                #endif
+            #else
+            // A real UITextView so system image paste works (long-press Paste,
+            // keyboard paste button, Cmd+V); Return sends, Shift+Return breaks.
+            ComposerTextField(
+                text: $viewModel.inputText,
+                focused: $focused,
+                placeholder: placeholder,
+                canAttachImages: viewModel.canAttachImages,
+                onSubmit: performSend,
+                onPasteImages: pasteImages
+            )
+            .padding(.horizontal, 4)
+            #endif
 
             HStack(spacing: 8) {
                 photoButton
                 fileButton
-                #if os(iOS)
-                if viewModel.canAttachImages {
-                    PasteImageControl { providers in
-                        Task {
-                            viewModel.addBase64Images(await ImageAttachmentProcessor.makeBase64JPEGs(from: providers))
-                        }
-                    }
-                }
-                #endif
                 agentMenu
                 if let agent = session.agent, agent.allModelIds.count > 1 {
                     modelMenu
@@ -156,6 +124,8 @@ struct ComposerView: View {
         #if os(macOS)
         // Only .image is claimed: text paste and Finder file-copy paste keep
         // falling through to the text field (a file copy inserts its path).
+        // iOS handles image paste inside ComposerTextField — onPasteCommand
+        // is explicitly unavailable there despite what Apple's docs claim.
         .onPasteCommand(of: [.image]) { providers in
             guard viewModel.canAttachImages else { return }
             Task {
@@ -374,15 +344,11 @@ struct ComposerView: View {
     // MARK: - Send / stop
 
     #if os(iOS)
-    /// Inserts "\n" at the cursor WITHOUT `insertText` — SwiftUI treats an
-    /// inserted newline as Return and fires onSubmit. `UITextInput.replace`
-    /// is the programmatic-edit path and bypasses submit detection.
-    private func insertNewlineAtCursor() {
-        if let input = UIResponder.currentFirst as? UITextInput,
-           let range = input.selectedTextRange {
-            input.replace(range, withText: "\n")
-        } else {
-            viewModel.inputText += "\n"
+    /// Images from the system paste pipeline become attachments; text paste
+    /// stays in the field itself.
+    private func pasteImages(_ providers: [NSItemProvider]) {
+        Task {
+            viewModel.addBase64Images(await ImageAttachmentProcessor.makeBase64JPEGs(from: providers))
         }
     }
     #endif
@@ -425,57 +391,206 @@ struct ComposerView: View {
 }
 
 #if os(iOS)
-private extension UIResponder {
-    @MainActor static weak var _currentFirst: UIResponder?
+/// Multiline chat input backed by a real UITextView so the system paste
+/// pipeline (long-press Paste, the software keyboard's paste button, Cmd+V)
+/// works for images: an image clipboard becomes attachments while text
+/// paste keeps falling through to the field itself. Return submits;
+/// Shift+Return (hardware keyboard) inserts a line break.
+private struct ComposerTextField: UIViewRepresentable {
+    @Binding var text: String
+    @Binding var focused: Bool
+    let placeholder: String
+    let canAttachImages: Bool
+    let onSubmit: () -> Void
+    let onPasteImages: ([NSItemProvider]) -> Void
 
-    /// The current first responder, found by bouncing an action down the
-    /// responder chain (UIKit has no public accessor). Used to insert a line
-    /// break at the cursor for hardware-keyboard Shift+Return.
-    @MainActor static var currentFirst: UIResponder? {
-        _currentFirst = nil
-        UIApplication.shared.sendAction(#selector(captureFirst), to: nil, from: nil, for: nil)
-        return _currentFirst
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeUIView(context: Context) -> ComposerUITextView {
+        let view = ComposerUITextView()
+        view.delegate = context.coordinator
+        view.onSubmit = onSubmit
+        view.onPasteImages = onPasteImages
+        return view
     }
 
-    @MainActor @objc private func captureFirst() {
-        UIResponder._currentFirst = self
+    func updateUIView(_ view: ComposerUITextView, context: Context) {
+        context.coordinator.parent = self
+        view.onSubmit = onSubmit
+        view.onPasteImages = onPasteImages
+        view.canAttachImages = canAttachImages
+        view.placeholderLabel.text = placeholder
+        // Programmatic sets don't fire textViewDidChange — keep the
+        // placeholder in sync here (typing goes through the delegate).
+        if view.text != text {
+            view.text = text
+            view.updatePlaceholderVisibility()
+        }
+        view.updateScrollability()
+        // Defer: becomeFirstResponder inside a view-update pass is ignored
+        // during appearance transitions.
+        if focused, !view.isFirstResponder {
+            DispatchQueue.main.async { view.becomeFirstResponder() }
+        } else if !focused, view.isFirstResponder {
+            DispatchQueue.main.async { view.resignFirstResponder() }
+        }
+    }
+
+    /// Caps the field at roughly eight lines (the old lineLimit(1...8)),
+    /// then the text view scrolls. Without this the representable would
+    /// greedily eat whatever height the layout offers.
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: ComposerUITextView, context: Context) -> CGSize? {
+        let width = proposal.width ?? UIScreen.main.bounds.width
+        let fitting = uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
+        return CGSize(width: width, height: min(fitting.height, uiView.maxContentHeight))
+    }
+
+    final class Coordinator: NSObject, UITextViewDelegate {
+        var parent: ComposerTextField
+
+        init(_ parent: ComposerTextField) { self.parent = parent }
+
+        func textViewDidChange(_ textView: UITextView) {
+            parent.text = textView.text
+            (textView as? ComposerUITextView)?.updatePlaceholderVisibility()
+            (textView as? ComposerUITextView)?.updateScrollability()
+        }
+
+        func textViewDidBeginEditing(_ textView: UITextView) { parent.focused = true }
+        func textViewDidEndEditing(_ textView: UITextView) { parent.focused = false }
+
+        func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+            // Software-keyboard Return. Shift+Return (hardware) arrives with
+            // the flag set by pressesBegan; a pasted lone newline arrives
+            // with isPasting set — neither may submit.
+            if text == "\n", let view = textView as? ComposerUITextView,
+               !view.isInsertingShiftNewline, !view.isPasting {
+                parent.onSubmit()
+                return false
+            }
+            return true
+        }
     }
 }
 
-/// System paste button (iOS 16+): reads the clipboard WITHOUT the
-/// paste-permission alert, because the tap goes through Apple's own UI.
-/// It tracks the pasteboard itself and is enabled only when the clipboard
-/// holds content matching the coordinator's `pasteConfiguration` (images).
-private struct PasteImageControl: UIViewRepresentable {
-    /// Called with the clipboard's item providers on tap.
-    let onPaste: ([NSItemProvider]) -> Void
+private final class ComposerUITextView: UITextView {
+    var onSubmit: (() -> Void)?
+    var onPasteImages: (([NSItemProvider]) -> Void)?
+    var canAttachImages = false
+    /// Set while Shift+Return is inserting a newline so the delegate
+    /// doesn't read that newline as a submit.
+    private(set) var isInsertingShiftNewline = false
+    /// Set while a paste inserts text so a pasted lone "\n" isn't mistaken
+    /// for the Return key.
+    var isPasting = false
 
-    func makeCoordinator() -> Coordinator { Coordinator(onPaste: onPaste) }
+    let placeholderLabel = UILabel()
 
-    func makeUIView(context: Context) -> UIPasteControl {
-        let config = UIPasteControl.Configuration()
-        config.displayMode = .iconOnly
-        config.cornerStyle = .capsule
-        config.baseBackgroundColor = UIColor(Theme.surfaceRaised)
-        config.baseForegroundColor = UIColor(Color.secondary)
-        let control = UIPasteControl(configuration: config)
-        control.target = context.coordinator
-        return control
+    /// Eight lines of Theme.Typography.body (15/22) plus the vertical inset.
+    var maxContentHeight: CGFloat {
+        let line = font?.lineHeight ?? 22
+        return line * 8 + textContainerInset.top + textContainerInset.bottom
     }
 
-    func updateUIView(_ control: UIPasteControl, context: Context) {
-        context.coordinator.onPaste = onPaste
+    override init(frame: CGRect, textContainer: NSTextContainer?) {
+        super.init(frame: frame, textContainer: textContainer)
+        // Matches Theme.Typography.body (15 pt regular).
+        font = .systemFont(ofSize: 15)
+        textColor = .label
+        backgroundColor = .clear
+        textContainerInset = UIEdgeInsets(top: 8, left: 0, bottom: 8, right: 0)
+        self.textContainer.lineFragmentPadding = 0
+        isScrollEnabled = false
+        returnKeyType = .send
+
+        placeholderLabel.font = font
+        placeholderLabel.textColor = .placeholderText
+        placeholderLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(placeholderLabel)
+        NSLayoutConstraint.activate([
+            placeholderLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: textContainerInset.left),
+            placeholderLabel.topAnchor.constraint(equalTo: topAnchor, constant: textContainerInset.top),
+        ])
+        updatePlaceholderVisibility()
     }
 
-    final class Coordinator: NSObject, UIPasteConfigurationSupporting {
-        var onPaste: ([NSItemProvider]) -> Void
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-        init(onPaste: @escaping ([NSItemProvider]) -> Void) { self.onPaste = onPaste }
+    func updatePlaceholderVisibility() {
+        placeholderLabel.isHidden = !text.isEmpty
+    }
 
-        var pasteConfiguration: UIPasteConfiguration? =
-            UIPasteConfiguration(acceptableTypeIdentifiers: [UTType.image.identifier])
+    /// Scrolling stays off while the content fits, so the field grows with
+    /// the text; past the cap it scrolls instead of stretching the card.
+    func updateScrollability() {
+        isScrollEnabled = false
+        let fitting = sizeThatFits(CGSize(width: bounds.width, height: .greatestFiniteMagnitude))
+        isScrollEnabled = fitting.height > maxContentHeight + 1
+    }
 
-        func paste(itemProviders: [NSItemProvider]) { onPaste(itemProviders) }
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        for press in presses {
+            guard press.key?.keyCode == .keyboardReturnOrEnter else { continue }
+            if press.key?.modifierFlags.contains(.shift) == true {
+                // Let UIKit insert the newline; the flag keeps the delegate
+                // from treating it as a submit.
+                isInsertingShiftNewline = true
+                super.pressesBegan(presses, with: event)
+                isInsertingShiftNewline = false
+            } else {
+                onSubmit?()
+            }
+            return
+        }
+        super.pressesBegan(presses, with: event)
+    }
+
+    // MARK: Paste — images become attachments, text stays in the field.
+
+    override var pasteConfiguration: UIPasteConfiguration? {
+        get {
+            var types = [UTType.text.identifier, UTType.plainText.identifier, UTType.utf8PlainText.identifier]
+            if canAttachImages { types.insert(UTType.image.identifier, at: 0) }
+            return UIPasteConfiguration(acceptableTypeIdentifiers: types)
+        }
+        set {}
+    }
+
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        if action == #selector(paste(_:)), canAttachImages, UIPasteboard.general.hasImages {
+            return true
+        }
+        return super.canPerformAction(action, withSender: sender)
+    }
+
+    override func paste(_ sender: Any?) {
+        // Mixed text+image clipboard: attach the images AND insert the text
+        // (rich-text editing is off, so super.paste drops images itself).
+        if canAttachImages, UIPasteboard.general.hasImages {
+            onPasteImages?(UIPasteboard.general.itemProviders)
+        }
+        if UIPasteboard.general.hasStrings {
+            isPasting = true
+            super.paste(sender)
+            isPasting = false
+        }
+    }
+
+    // The modern paste pipeline (keyboard shortcut bar) routes through
+    // these; canPasteItemProviders comes from UIPasteConfigurationSupporting
+    // (retroactive UITextView conformance) and can't take `override`.
+
+    override func paste(itemProviders: [NSItemProvider]) {
+        // Same payload as the general pasteboard — reuse the classic path.
+        paste(nil)
+    }
+
+    func canPasteItemProviders(_ itemProviders: [NSItemProvider]) -> Bool {
+        guard let acceptable = pasteConfiguration?.acceptableTypeIdentifiers else { return false }
+        return itemProviders.contains { provider in
+            acceptable.contains { provider.hasItemConformingToTypeIdentifier($0) }
+        }
     }
 }
 #endif
