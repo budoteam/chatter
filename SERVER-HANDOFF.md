@@ -9,23 +9,29 @@
 
 ## Grundidee
 
-Eine macOS-Server-App (Swift, gleiche Codebasis) läuft dauerhaft auf einem Mac
-und ist mit derselben Apple-ID bei iCloud angemeldet → gleiche private
-CloudKit-DB (`iCloud.team.budo.chatter`): Sessions, Agents, MCP-Configs,
-Knowledge, Skills — alles identisch. Geht die iOS-App in den Hintergrund (oder
-soll beendet werden), übergibt sie den laufenden Turn an den Server; das
-Ergebnis erscheint via CloudKit-Sync auf allen Geräten.
+**Kein separates Server-Binary:** die normale **macOS-Chatter-App** bekommt
+einen Server-Modus (Toggle in den Settings). Sie hat bereits alles Nötige:
+`ChatEngine`, `OllamaService`, MCP-Verbindungen, SwiftData-Stack und — über
+dieselbe Apple-ID — dieselbe private CloudKit-DB (`iCloud.team.budo.chatter`).
+Jeder Mac mit laufender Chatter-App ist damit ein potenzieller Handoff-Server.
 
-## Warum der Aufwand klein ist
+Geht die iOS-App in den Hintergrund (oder soll beendet werden), übergibt sie
+den laufenden Turn an einen erreichbaren Mac; das Ergebnis erscheint via
+CloudKit-Sync auf allen Geräten.
 
-- `ChatEngine`, `OllamaService`, `MCPConnectionManager`, Tool-Provider und alle
-  `@Model`-Klassen sind bereits plattformgeteilt (der Watch-Target linkt sie
-  heute schon per Source-Pfad in `project.yml`). Der Server ist im Kern
-  «ChatEngine ohne UI»: neues Target in `project.yml`, das
-  `Chatter/Models` + `Chatter/Services` + `Persistence.swift` linkt.
-- Der Handoff-Aufruf auf Serverseite ist faktisch das vorhandene
-  `regenerate(session:agent:context:)`.
-- `NSAllowsArbitraryLoads` (LAN/Tailscale-HTTP) ist bereits gesetzt.
+## Was der macOS-App dafür fehlt
+
+1. **Listener**: `NWListener` (Network Framework, keine neue Dependency),
+   advertised `_chatter._tcp` per Bonjour, nimmt `POST /handoff` entgegen,
+   abgesichert über geteiltes Token (einmalige Kopplung per QR/Einstellung).
+2. **Entitlement**: Release-Builds laufen mit App Sandbox → eingehende
+   Verbindungen brauchen `com.apple.security.network.server` in **beiden**
+   Entitlement-Dateien (`Chatter-macOS.entitlements` +
+   `Chatter-macOS-Release.entitlements`).
+3. **Wachhalten**: App Nap → `ProcessInfo.beginActivity(.userInitiated)`
+   während Turns; System-Sleep → «Wake for network access» + Bonjour Sleep
+   Proxy (greift bei Bonjour-advertised `NWListener` automatisch, Mac muss
+   am Strom hängen). Die App läuft ohnehin ohne Fenster weiter.
 
 ## Architektur
 
@@ -96,9 +102,9 @@ Direkter Kanal:
 
 ## Offene Entscheide bei Umsetzung
 
-- Einbetten als zweites App-Target in diesem Repo (naheliegend, teilt alles)
-  vs. eigenes Repo.
 - Handoff automatisch bei jedem Hintergrund-Wechsel oder nur bei langen
   Turns / manuell?
+- Mehrere Macs mit Server-Modus im Netz: Auswahlstrategie (erster
+  erreichbarer, bevorzugtes Gerät per Einstellung)?
 - Soll der Server auch **ohne** Handoff autonom Reminder-Actions ausführen
   können (er sieht sie ja in CloudKit)?
