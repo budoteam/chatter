@@ -76,8 +76,25 @@ Authentisierung), Tailscale-Workarounds — und jede offene Port-
 Angriffsfläche.
 
 **Risiko:** Merkt der Mac nichts (App geschlossen, iCloud hängt), verfällt
-der Request still — Verhalten wie heute ohne Server. Mitigation beim Start:
-beim App-Launch offene Requests prüfen.
+der Request still — Verhalten wie heute ohne Server: Der lokale Turn läuft
+mit `TurnRuntimeKeeper` so lange weiter, wie iOS erlaubt, danach sauberer
+Abbruch mit Teil-Content + Notification. Mitigation beim Start: beim
+App-Launch offene Requests prüfen.
+
+**Notification-Lücke (bewusst dokumentiert):** Übernimmt ein Mac, feuert die
+Completion-Notification auf dem **Mac**, nicht auf dem iPhone — die Antwort
+kommt dort nur still per Sync an. Zwei Umsetzungsdetails:
+
+1. **Suppression beim Claim-Cancel**: Cancelt iOS den lokalen Turn wegen
+   eines Handoffs, darf `notifyCompletionIfNeeded` **keine** Notification
+   schicken (sonst «Reply ready» mit halbfertigem Preview). `stopTurn`
+   braucht dafür einen Grund-Parameter.
+2. **Ausbau (Schritt 2)**: Der Server markiert den Request als completed;
+   ein `UIApplicationDelegateAdaptor` auf iOS wertet den ohnehin
+   ankommenden CloudKit-Silent-Push aus (`remote-notification`-Mode
+   existiert) und postet die Notification lokal. Silent Pushes sind
+   best-effort — die Daten syncen unabhängig davon, nur die Mitteilung
+   kann ausfallen.
 
 **Optionaler Ausbau:** Ein Bonjour-Listener bleibt als späterer Beschleuniger
 (sub-Sekunden-Handoff) bzw. für den reinen Lokal-Modus ohne iCloud denkbar —
