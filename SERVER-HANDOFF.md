@@ -21,17 +21,14 @@ CloudKit-Sync auf allen Geräten.
 
 ## Was der macOS-App dafür fehlt
 
-1. **Listener**: `NWListener` (Network Framework, keine neue Dependency),
-   advertised `_chatter._tcp` per Bonjour, nimmt `POST /handoff` entgegen,
-   abgesichert über geteiltes Token (einmalige Kopplung per QR/Einstellung).
-2. **Entitlement**: Release-Builds laufen mit App Sandbox → eingehende
-   Verbindungen brauchen `com.apple.security.network.server` in **beiden**
-   Entitlement-Dateien (`Chatter-macOS.entitlements` +
-   `Chatter-macOS-Release.entitlements`).
+1. **Handoff-Beobachter**: Observer auf `NSPersistentStoreRemoteChange`
+   (SwiftData-Mirroring) + Claim- und Ausführungslogik, gesteuert über einen
+   «Server-Modus»-Toggle in den Settings.
+2. **`HandoffRequest`-`@Model`** (inkl. Claim-Feldern `claimedByDeviceID` +
+   Heartbeat) → CloudKit-Schema-Deploy vor Release nötig.
 3. **Wachhalten**: App Nap → `ProcessInfo.beginActivity(.userInitiated)`
-   während Turns; System-Sleep → «Wake for network access» + Bonjour Sleep
-   Proxy (greift bei Bonjour-advertised `NWListener` automatisch, Mac muss
-   am Strom hängen). Die App läuft ohnehin ohne Fenster weiter.
+   während Turns; System-Sleep → «Wake for network access». Die App läuft
+   ohnehin ohne Fenster weiter.
 
 ## Architektur
 
@@ -39,61 +36,64 @@ CloudKit-Sync auf allen Geräten.
 sequenceDiagram
     participant iOS as iOS App
     participant CK as CloudKit
-    participant S as macOS Server
-    iOS->>S: POST /handoff {sessionID} (LAN/Tailscale, Token)
-    S-->>iOS: 202 accepted
-    iOS->>iOS: lokalen Turn canceln (Teil-Content bleibt persistiert)
+    participant S as macOS (Server-Modus)
+    iOS->>CK: HandoffRequest {sessionID}
+    iOS->>iOS: lokaler Turn läuft weiter (TurnRuntimeKeeper)
+    CK-->>S: Remote-Change-Notification (Mirroring)
+    S->>CK: Claim (atomar via Change-Tag)
+    CK-->>iOS: Claim syncs → iOS cancelt lokalen Turn
     S->>CK: neue Messages schreiben (Stream + Tool-Loop)
-    CK-->>iOS: Silent Push / Sync → Antwort erscheint
+    CK-->>iOS: Antwort erscheint + lokale Notification
 ```
 
-### Steuerkanal (nicht CloudKit!)
+### Steuerkanal: CloudKit (kein Listener nötig)
 
-CloudKit hat Sekunden- bis Minuten-Latenz — ungeeignet als Handoff-Signal.
-Direkter Kanal:
+Der Handoff läuft über CloudKit selbst — ein eigener Netzwerkkanal entfällt:
 
-- Bonjour-Discovery (`NWBrowser`, Service-Typ `_chatter._tcp`) + kleiner
-  HTTP-Endpunkt auf dem Mac (`POST /handoff`).
-- Absicherung über geteiltes Token (einmalig per QR/Einstellung gekoppelt).
-- Erreichbarkeitsprüfung im Client vor dem Handoff; ohne Server bleibt alles
-  beim lokalen Verhalten (TurnRuntimeKeeper).
+1. iOS schreibt einen `HandoffRequest`-Record (`@Model`: Session-ID,
+   Erstellungs-Timestamp) und lässt den lokalen Turn vorerst weiterlaufen.
+2. Der Mac beobachtet SwiftData-CloudKit-Mirroring
+   (`NSPersistentStoreRemoteChange`-Notifications) und sieht neue Requests
+   typischerweise **innerhalb weniger Sekunden** — kein Polling, kein
+   Silent-Push-Handling nötig.
+3. Der Mac claimt den Request atomar (Record-Change-Tag; bei mehreren Macs
+   gewinnt genau einer) und führt den Turn aus.
+4. Sobald der Claim bei iOS syncs, cancelt iOS den lokalen Turn. Läuft die
+   lokale Hintergrundzeit vorher ab, ist das nicht tragisch: Der Server
+   setzt den Turn aus der Session-History fort (Teil-Content bleibt
+   persistiert, siehe Race-Regel unten).
 
-### Discovery & Server-Auswahl bei mehreren Macs
+**Warum CloudKit hier reicht, obwohl es «kein Echtzeitkanal» ist:** Der User
+hat die App verlassen — Pickup-Latenz von Sekunden bis Minuten ist
+wahrnehmbar irrelevant, und der `TurnRuntimeKeeper` (seit 2.4) überbrückt
+die Wartezeit lokal. Zudem gilt Queue-Semantik gratis: Ein offline Mac holt
+verfallene Requests später nach (mit Alter-Limit, z. B. 2 h).
 
-- **Kein Leader nötig**: Jeder Mac mit Server-Modus advertised sich; alle
-  Instanzen haben dieselben CloudKit-Daten und sind gleichwertig. Es gibt
-  keine falsche Wahl — Election/Split-Brain-Probleme entfallen bewusst.
-- **Der Server wählt keinen Kanal**: Er öffnet genau einen `NWListener`
-  (TCP, Port 0 = system-assigned) auf allen Interfaces; Host + Port fliessen
-  über den Bonjour-Record zum Client, der resolved und verbindet. Der Server
-  initiiert nie selbst etwas. Derselbe Listener bedient LAN und Tailscale-
-  Interface gleichzeitig.
-- **Client-Auswahl pro Handoff**: bevorzugtes Gerät aus den Settings, sonst
-  erster erreichbarer Treffer; Instanzen mit laufendem Turn setzen `busy=1`
-  im TXT-Record und werden übersprungen.
-- **iOS-Detail**: `NSBonjourServices: [_chatter._tcp]` in der Info.plist ist
-  Pflicht (iOS 14+), sonst sieht `NWBrowser` nichts.
-- **Tailscale-Lücke**: mDNS überquert kein Tailscale-Netz. Fallback:
-  manueller Host-Eintrag in den Settings oder Rendezvous-Record in CloudKit
-  (Server schreibt seine Tailscale-Adresse; Discovery-Latenz ist egal, nur
-  der Handoff selbst muss schnell sein).
-- **Doppelte Ausführung verhindern**: Der Server stempelt vor dem Start
-  einen Claim (`claimedByDeviceID` + Heartbeat) an die übernommene Message
-  nach CloudKit. Ein Ersatz-Server übernimmt nur bei Heartbeat älter ~60 s
-  (Failover nach Absturz des ersten). Das ist die einzige Stelle, an der
-  «wer ist der Server» persistiert wird — `@Model`-Änderung → CloudKit-
-  Schema-Deploy nötig.
+**Was dadurch entfällt** (gegenüber der Listener-Variante): `NWListener`,
+Bonjour-Advertise, `NSBonjourServices` in der Info.plist, das
+`network.server`-Entitlement, Token-Pairing (gleiche Apple-ID **ist** die
+Authentisierung), Tailscale-Workarounds — und jede offene Port-
+Angriffsfläche.
+
+**Risiko:** Merkt der Mac nichts (App geschlossen, iCloud hängt), verfällt
+der Request still — Verhalten wie heute ohne Server. Mitigation beim Start:
+beim App-Launch offene Requests prüfen.
+
+**Optionaler Ausbau:** Ein Bonjour-Listener bleibt als späterer Beschleuniger
+(sub-Sekunden-Handoff) bzw. für den reinen Lokal-Modus ohne iCloud denkbar —
+bewusst nicht Teil von v1.
 
 ### Ablauf im Detail
 
 1. iOS bemerkt Hintergrund-Wechsel (`scenePhase`) bzw. drohende Expiration
    des Background-Tasks.
-2. Server erreichbar? → `POST /handoff { sessionID }`, dann lokalen Turn
-   canceln (Teil-Content bleibt wie bei `CancellationError` stehen).
-3. Server lädt die Session aus seinem SwiftData-Store und führt den
-   Assistant-Turn aus (Tool-Loop inkl. MCP — stdio-MCP auf dem Mac ohne
+2. iOS schreibt den `HandoffRequest`; der lokale Turn läuft vorerst weiter.
+3. Der Mac sieht den Request via Remote-Change-Notification, claimt ihn und
+   führt den Turn aus (Tool-Loop inkl. MCP — stdio-MCP auf dem Mac ohne
    Sandbox-Probleme).
-4. Server speichert Messages → CloudKit → iOS zeigt sie beim nächsten Sync;
+4. Claim syncs zu iOS → iOS cancelt den lokalen Turn (Teil-Content bleibt
+   wie bei `CancellationError` stehen).
+5. Server speichert Messages → CloudKit → iOS zeigt sie beim nächsten Sync;
    zusätzlich lokale Notification «Antwort fertig» (Infrastruktur existiert
    seit 2.4, siehe `TurnRuntimeKeeper`).
 
@@ -117,10 +117,11 @@ Direkter Kanal:
 
 ## Alternativen (verworfen bzw. zurückgestellt)
 
-- **CloudKit als Job-Queue** (`PendingTurn`-Record, Server pollt /
-  `CKSubscription`): kein Netzwerkcode nötig, funktioniert übers Internet —
-  aber 10–60 s Latenz und schwerer zu deduplizieren. Fallback, falls der
-  LAN-Kanal sich als unzuverlässig erweist.
+- **Bonjour-Listener (`NWListener` + `POST /handoff`)**: ursprünglich als
+  Kernstück geplant, heruntergestuft — sub-Sekunden-Handoff ist ohne User in
+  der App wertlos, und die CloudKit-Variante spart Entitlement, Pairing,
+  Bonjour-Plist und Angriffsfläche. Bleibt als späterer Beschleuniger /
+  Lokal-Modus-ohne-iCloud-Option.
 - **BGTaskScheduler/BGProcessingTask**: muss im Voraus geplant werden, nicht
   für usergestartete Arbeit.
 - **Background-`URLSession`**: NDJSON-Streaming darüber wäre ein grosser
