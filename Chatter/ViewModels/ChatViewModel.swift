@@ -29,7 +29,7 @@ final class ChatViewModel {
         inputText = ""
         pendingImages = []
 
-        env.runTurn(for: session) { [weak self] in
+        env.runTurn(for: session, context: context) { [weak self] in
             do {
                 try await env.engine.send(text: text, images: images, session: session, agent: agent, context: context)
             } catch is CancellationError {
@@ -92,7 +92,7 @@ final class ChatViewModel {
         }
         context.saveOrLog()
 
-        env.runTurn(for: session) { [weak self] in
+        env.runTurn(for: session, context: context) { [weak self] in
             do {
                 try await env.engine.regenerate(session: session, agent: session.agent, context: context)
             } catch is CancellationError {

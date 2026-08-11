@@ -42,10 +42,11 @@ The data flow for a chat turn: `ComposerView` → `ChatViewModel` → `ChatEngin
 - **`MCPConnectionManager`** owns live MCP `Client` sessions and a **namespaced tool registry** (`serverName.toolName`) so tools from different servers can't collide; `ChatEngine` calls tools by namespaced name. Transports: Streamable HTTP + legacy SSE (`LegacySSEClientTransport`) on all platforms; stdio subprocesses on macOS only (`#if os(macOS)` — this is why the macOS sandbox is disabled in `Chatter-macOS.entitlements`).
 - **`OllamaService`** streams NDJSON from Ollama Cloud `/api/chat` (deltas, thinking traces, tool calls). The API key lives in the Keychain via `KeychainService` (iCloud-synced), never in SwiftData or UserDefaults.
 - **Services are behind protocols** (`Services/Protocols/`): `OllamaServiceProtocol`, `MCPClientProtocol`, `KnowledgeToolProviding` — `ChatEngine` and views depend on the protocols (the mocking seam for `ChatterTests`).
+- **Background execution & handoff**: `TurnRuntimeKeeper` wraps every turn (`AppEnvironment.runTurn`) — iOS 26 uses `BGContinuedProcessingTask` (system Live Activity), older iOS falls back to `beginBackgroundTask`; a turn finishing while the app is inactive posts a local notification. `HandoffRequest` (model) + `HandoffCoordinator` (claim rules) + `HandoffServer` (macOS, always on) implement the CloudKit-based turn handoff to a Mac — see `SERVER-HANDOFF.md`.
 
 ### SwiftData models must stay CloudKit-compatible
 
-All models (`Agent`, `ChatSession`, `Message`, `MCPServerConfig`) sync via CloudKit (`Persistence.makeContainer()` tries `.automatic`, falls back to local, then in-memory). That imposes conventions any new/changed model property must follow:
+All models (`Agent`, `ChatSession`, `Message`, `MCPServerConfig`, `HandoffRequest`, …) sync via CloudKit (`Persistence.makeContainer()` tries `.automatic`, falls back to local, then in-memory). That imposes conventions any new/changed model property must follow:
 
 - Every property needs a default value; relationships must be optional; no `@Attribute(.unique)`.
 - Nested/structured data is stored as JSON strings or raw values with computed-property accessors (e.g. `Message.toolCallsJSON` ↔ `toolCalls`, `roleRaw` ↔ `role`). Enums are stored as their raw value.

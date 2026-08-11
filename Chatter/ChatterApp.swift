@@ -56,6 +56,36 @@ private final class MacAppDelegate: NSObject, NSApplicationDelegate {
 #endif
 
 import UserNotifications
+#if os(iOS)
+import UIKit
+
+/// Registers for remote notifications and routes CloudKit silent pushes
+/// (server-side handoff progress, via the `HandoffRequest` subscription)
+/// to the app's reconciliation. `onSilentPush` is static because the
+/// delegate instance is created by the system through the adaptor, after
+/// `ChatterApp.init` has already wired things up.
+private final class IOSAppDelegate: NSObject, UIApplicationDelegate {
+    static var onSilentPush: () async -> Void = {}
+
+    func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+    ) -> Bool {
+        // Silent pushes need registration but no user permission.
+        application.registerForRemoteNotifications()
+        HandoffCoordinator.ensurePushSubscription()
+        return true
+    }
+
+    nonisolated func application(
+        _ application: UIApplication,
+        didReceiveRemoteNotification userInfo: [AnyHashable: Any]
+    ) async -> UIBackgroundFetchResult {
+        await Self.onSilentPush()
+        return .newData
+    }
+}
+#endif
 
 /// Notification delegate for reminders: banners also show while the app is in
 /// the foreground, and tapping a notification (like a plain launch, see
@@ -89,11 +119,32 @@ struct ChatterApp: App {
 
     @State private var environment: AppEnvironment
 
+    #if os(iOS)
+    @UIApplicationDelegateAdaptor(IOSAppDelegate.self) private var iosDelegate
+    @Environment(\.scenePhase) private var scenePhase
+    #endif
+    #if os(macOS)
+    /// Takes over handoff requests from the user's other devices (always on).
+    private let handoffServer: HandoffServer
+    #endif
+
     init() {
         let container = Persistence.makeContainer()
         self.modelContainer = container
         let environment = AppEnvironment()
         self._environment = State(initialValue: environment)
+        #if os(macOS)
+        self.handoffServer = HandoffServer(environment: environment, context: container.mainContext)
+        #endif
+        #if os(iOS)
+        IOSAppDelegate.onSilentPush = {
+            await environment.handleHandoffPush(context: container.mainContext)
+        }
+        // Missed pushes / requests from a previous run.
+        Task { @MainActor in
+            await environment.reconcileHandoffsOnActive(context: container.mainContext)
+        }
+        #endif
         notificationDelegate.onResponse = { response in
             Task { @MainActor in
                 // Turn-completion notifications carry the session to open.
@@ -142,6 +193,18 @@ struct ChatterApp: App {
             RootView()
                 .environment(environment)
                 .tint(Theme.accent)
+                #if os(iOS)
+                .onChange(of: scenePhase) { _, phase in
+                    switch phase {
+                    case .background:
+                        environment.requestHandoffsForActiveTurns(context: modelContainer.mainContext)
+                    case .active:
+                        Task { await environment.reconcileHandoffsOnActive(context: modelContainer.mainContext) }
+                    default:
+                        break
+                    }
+                }
+                #endif
         }
         .modelContainer(modelContainer)
         .commands { appCommands }

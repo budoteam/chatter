@@ -31,6 +31,7 @@ enum Persistence {
         MemoryEntry.self,
         ReminderEntry.self,
         Skill.self,
+        HandoffRequest.self,
     ])
 
     static func makeContainer() -> ModelContainer {

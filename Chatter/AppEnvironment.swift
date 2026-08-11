@@ -126,11 +126,27 @@ final class AppEnvironment {
         activeTurns[session.id] != nil
     }
 
+    /// Sessions with a locally running turn — the handoff server skips
+    /// these (no point executing a turn this Mac is already running).
+    var activeTurnSessionIDs: Set<UUID> { Set(activeTurns.keys) }
+
+    /// Why a turn was stopped. `.handoff` means a server claimed the turn:
+    /// the completion notification is suppressed (the server reports
+    /// completion through the request) and the request stays open.
+    enum TurnStopReason {
+        case user, handoff
+    }
+
+    /// Sessions whose turn was stopped for handoff — consumed by the
+    /// `runTurn` teardown.
+    private var suppressedCompletions: Set<UUID> = []
+
     /// Runs one assistant turn for the session; no-op while one is running.
     /// The turn is wrapped in `TurnRuntimeKeeper` so it survives the app
     /// going to the background (iOS), and finishing while inactive posts a
-    /// local notification.
-    func runTurn(for session: ChatSession, _ body: @escaping @MainActor () async -> Void) {
+    /// local notification. A locally finished turn withdraws its handoff
+    /// request — nothing left for a server to do.
+    func runTurn(for session: ChatSession, context: ModelContext, _ body: @escaping @MainActor () async -> Void) {
         let id = session.id
         guard activeTurns[id] == nil else { return }
         TurnRuntimeKeeper.begin(sessionID: id, subtitle: session.title) { [weak self] in
@@ -140,6 +156,9 @@ final class AppEnvironment {
             await body()
             activeTurns[id] = nil
             TurnRuntimeKeeper.end(sessionID: id)
+            let handedOff = suppressedCompletions.remove(id) != nil
+            guard !handedOff else { return }
+            HandoffCoordinator.cancelOpenRequests(sessionID: id, context: context)
             let preview = session.orderedMessages
                 .last(where: { $0.role == .assistant })
                 .map { String($0.content.prefix(200)) } ?? "Reply ready"
@@ -149,7 +168,8 @@ final class AppEnvironment {
         }
     }
 
-    func stopTurn(for session: ChatSession) {
+    func stopTurn(for session: ChatSession, reason: TurnStopReason = .user) {
+        if reason == .handoff { suppressedCompletions.insert(session.id) }
         activeTurns[session.id]?.cancel()
     }
 
@@ -163,6 +183,69 @@ final class AppEnvironment {
     }
 
     func refreshAPIKeyState() { hasAPIKey = KeychainService.hasAPIKey }
+
+    // MARK: - Handoff (iOS requesting side)
+
+    #if os(iOS)
+    /// Backgrounding with live turns: publish a handoff request per active
+    /// session so any Mac of this iCloud account can take over (the local
+    /// turn keeps running meanwhile — first finisher wins).
+    func requestHandoffsForActiveTurns(context: ModelContext) {
+        guard Persistence.storeMode == .cloudKit else { return }
+        for sessionID in activeTurns.keys {
+            guard HandoffCoordinator.openRequest(for: sessionID, context: context) == nil else { continue }
+            let descriptor = FetchDescriptor<ChatSession>(predicate: #Predicate { $0.id == sessionID })
+            guard let session = try? context.fetch(descriptor).first else { continue }
+            context.insert(HandoffRequest(sessionID: sessionID, sessionTitle: session.title))
+            AppLogger.data.info("Handoff requested for session \(sessionID.uuidString, privacy: .public)")
+        }
+        context.saveOrLog()
+    }
+
+    /// Foreground again: withdraw open requests (local turns continue or
+    /// are done), stop local copies of claimed turns, and sweep completions.
+    func reconcileHandoffsOnActive(context: ModelContext) async {
+        guard Persistence.storeMode == .cloudKit else { return }
+        stopLocallyClaimedTurns(context: context)
+        HandoffCoordinator.cancelOpenRequests(context: context)
+        await notifyCompletedHandoffs(context: context)
+        HandoffCoordinator.prune(context: context)
+    }
+
+    /// Silent push (server wrote a claim or completion): adopt claims and
+    /// notify — deliberately does NOT withdraw open requests, the app is
+    /// still backgrounded with its local turn running.
+    func handleHandoffPush(context: ModelContext) async {
+        guard Persistence.storeMode == .cloudKit else { return }
+        stopLocallyClaimedTurns(context: context)
+        await notifyCompletedHandoffs(context: context)
+        HandoffCoordinator.prune(context: context)
+    }
+
+    private func stopLocallyClaimedTurns(context: ModelContext) {
+        for sessionID in activeTurns.keys {
+            guard HandoffCoordinator.claimedRequest(for: sessionID, context: context) != nil else { continue }
+            let descriptor = FetchDescriptor<ChatSession>(predicate: #Predicate { $0.id == sessionID })
+            guard let session = try? context.fetch(descriptor).first else { continue }
+            AppLogger.data.info("Handoff claimed by a server, stopping local turn for \(sessionID.uuidString, privacy: .public)")
+            stopTurn(for: session, reason: .handoff)
+        }
+    }
+
+    private func notifyCompletedHandoffs(context: ModelContext) async {
+        for request in HandoffCoordinator.completedUnnotified(context: context) {
+            await TurnRuntimeKeeper.notifyCompletionIfNeeded(
+                sessionID: request.sessionID,
+                title: request.sessionTitle,
+                preview: request.preview
+            )
+            // Marked even when the app is active (no notification posted) —
+            // the user is looking at the result already.
+            request.notifiedAt = .now
+        }
+        context.saveOrLog()
+    }
+    #endif
 
     // MARK: - Reminder actions
 
@@ -203,7 +286,7 @@ final class AppEnvironment {
             context.saveOrLog()
 
             let prompt = entry.actionPrompt
-            runTurn(for: session) { [weak self] in
+            runTurn(for: session, context: context) { [weak self] in
                 guard let self else { return }
                 do {
                     try await self.engine.send(text: prompt, session: session, agent: agent, context: context)
