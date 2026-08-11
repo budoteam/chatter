@@ -58,6 +58,32 @@ Direkter Kanal:
 - Erreichbarkeitsprüfung im Client vor dem Handoff; ohne Server bleibt alles
   beim lokalen Verhalten (TurnRuntimeKeeper).
 
+### Discovery & Server-Auswahl bei mehreren Macs
+
+- **Kein Leader nötig**: Jeder Mac mit Server-Modus advertised sich; alle
+  Instanzen haben dieselben CloudKit-Daten und sind gleichwertig. Es gibt
+  keine falsche Wahl — Election/Split-Brain-Probleme entfallen bewusst.
+- **Der Server wählt keinen Kanal**: Er öffnet genau einen `NWListener`
+  (TCP, Port 0 = system-assigned) auf allen Interfaces; Host + Port fliessen
+  über den Bonjour-Record zum Client, der resolved und verbindet. Der Server
+  initiiert nie selbst etwas. Derselbe Listener bedient LAN und Tailscale-
+  Interface gleichzeitig.
+- **Client-Auswahl pro Handoff**: bevorzugtes Gerät aus den Settings, sonst
+  erster erreichbarer Treffer; Instanzen mit laufendem Turn setzen `busy=1`
+  im TXT-Record und werden übersprungen.
+- **iOS-Detail**: `NSBonjourServices: [_chatter._tcp]` in der Info.plist ist
+  Pflicht (iOS 14+), sonst sieht `NWBrowser` nichts.
+- **Tailscale-Lücke**: mDNS überquert kein Tailscale-Netz. Fallback:
+  manueller Host-Eintrag in den Settings oder Rendezvous-Record in CloudKit
+  (Server schreibt seine Tailscale-Adresse; Discovery-Latenz ist egal, nur
+  der Handoff selbst muss schnell sein).
+- **Doppelte Ausführung verhindern**: Der Server stempelt vor dem Start
+  einen Claim (`claimedByDeviceID` + Heartbeat) an die übernommene Message
+  nach CloudKit. Ein Ersatz-Server übernimmt nur bei Heartbeat älter ~60 s
+  (Failover nach Absturz des ersten). Das ist die einzige Stelle, an der
+  «wer ist der Server» persistiert wird — `@Model`-Änderung → CloudKit-
+  Schema-Deploy nötig.
+
 ### Ablauf im Detail
 
 1. iOS bemerkt Hintergrund-Wechsel (`scenePhase`) bzw. drohende Expiration
@@ -104,7 +130,5 @@ Direkter Kanal:
 
 - Handoff automatisch bei jedem Hintergrund-Wechsel oder nur bei langen
   Turns / manuell?
-- Mehrere Macs mit Server-Modus im Netz: Auswahlstrategie (erster
-  erreichbarer, bevorzugtes Gerät per Einstellung)?
 - Soll der Server auch **ohne** Handoff autonom Reminder-Actions ausführen
   können (er sieht sie ja in CloudKit)?
