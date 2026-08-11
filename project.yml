@@ -13,9 +13,9 @@ packages:
 
 settings:
   base:
-    MARKETING_VERSION: "2.3"
+    MARKETING_VERSION: "2.4"
     # Build number scheme: <yyyymmdd>.<counter that day>
-    CURRENT_PROJECT_VERSION: "20260809.1"
+    CURRENT_PROJECT_VERSION: "20260812.1"
     SWIFT_VERSION: "5.0"
     CODE_SIGN_STYLE: Automatic
     DEVELOPMENT_TEAM: X9FHM3F6WK
@@ -73,8 +73,13 @@ targets:
         # Only HTTPS/ATS-exempt networking, no custom crypto — skips the
         # export-compliance question on every TestFlight upload.
         ITSAppUsesNonExemptEncryption: false
-        # CloudKit pings devices via silent push when records change.
-        UIBackgroundModes: [remote-notification]
+        # CloudKit pings devices via silent push when records change;
+        # "processing" allows iOS 26 continued-processing tasks to keep a
+        # running assistant turn alive in the background.
+        UIBackgroundModes: [remote-notification, processing]
+        # Per-turn continued-processing tasks (iOS 26+), registered lazily
+        # with the exact session-UUID suffix before each submission.
+        BGTaskSchedulerPermittedIdentifiers: ["team.budo.chatter.turn.*"]
     dependencies:
       - package: MCP
         product: MCP

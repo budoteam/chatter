@@ -61,7 +61,7 @@ import UserNotifications
 /// the foreground, and tapping a notification (like a plain launch, see
 /// `RootView.task`) runs pending reminder actions.
 private final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
-    var onResponse: (() -> Void)?
+    var onResponse: ((UNNotificationResponse) -> Void)?
 
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
@@ -74,7 +74,7 @@ private final class NotificationDelegate: NSObject, UNUserNotificationCenterDele
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse
     ) async {
-        onResponse?()
+        onResponse?(response)
     }
 }
 
@@ -94,8 +94,19 @@ struct ChatterApp: App {
         self.modelContainer = container
         let environment = AppEnvironment()
         self._environment = State(initialValue: environment)
-        notificationDelegate.onResponse = {
+        notificationDelegate.onResponse = { response in
             Task { @MainActor in
+                // Turn-completion notifications carry the session to open.
+                if let raw = response.notification.request.content.userInfo["sessionID"] as? String,
+                   let sessionID = UUID(uuidString: raw) {
+                    var descriptor = FetchDescriptor<ChatSession>(
+                        predicate: #Predicate { $0.id == sessionID }
+                    )
+                    descriptor.fetchLimit = 1
+                    if let session = try? container.mainContext.fetch(descriptor).first {
+                        environment.openChat(session)
+                    }
+                }
                 await ReminderScheduler.reconcile(context: container.mainContext)
                 environment.runDueReminderActions(context: container.mainContext)
             }

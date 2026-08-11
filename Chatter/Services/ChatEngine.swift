@@ -29,6 +29,10 @@ final class ChatEngine {
     /// Live phase per session id; set and cleared by `runTurns`.
     private(set) var turnPhase: [UUID: TurnPhase] = [:]
 
+    /// Reports each completed tool round so the host can surface progress
+    /// (the iOS 26 continued-processing Live Activity); nil in tests.
+    var onToolRound: (@MainActor (_ sessionID: UUID, _ round: Int, _ maxRounds: Int) -> Void)?
+
     init(ollama: OllamaServiceProtocol, mcp: MCPClientProtocol, knowledge: KnowledgeToolProviding, artifacts: ArtifactToolProvider) {
         self.ollama = ollama
         self.mcp = mcp
@@ -410,6 +414,7 @@ final class ChatEngine {
             }
             session.updatedAt = .now
             context.saveOrLog()
+            onToolRound?(session.id, iteration, maxToolIterations)
             // Loop: model gets another turn with the tool results in history.
         }
     }

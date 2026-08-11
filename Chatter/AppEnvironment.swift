@@ -75,6 +75,11 @@ final class AppEnvironment {
         self.knowledge = knowledge
         self.artifacts = artifacts
         self.engine = ChatEngine(ollama: ollama, mcp: mcp, knowledge: knowledge, artifacts: artifacts)
+        // Tool rounds are the only progress signal a turn has; the keeper
+        // maps them onto the iOS 26 continued-processing Live Activity.
+        engine.onToolRound = { sessionID, round, maxRounds in
+            TurnRuntimeKeeper.updateProgress(sessionID: sessionID, toolRound: round, maxRounds: maxRounds)
+        }
         #if os(iOS) || os(watchOS)
         // iCloud Keychain doesn't reliably sync to watchOS; the watch pulls
         // the API key from the paired iPhone over WatchConnectivity instead.
@@ -122,12 +127,25 @@ final class AppEnvironment {
     }
 
     /// Runs one assistant turn for the session; no-op while one is running.
+    /// The turn is wrapped in `TurnRuntimeKeeper` so it survives the app
+    /// going to the background (iOS), and finishing while inactive posts a
+    /// local notification.
     func runTurn(for session: ChatSession, _ body: @escaping @MainActor () async -> Void) {
         let id = session.id
         guard activeTurns[id] == nil else { return }
+        TurnRuntimeKeeper.begin(sessionID: id, subtitle: session.title) { [weak self] in
+            self?.stopTurn(for: session)
+        }
         activeTurns[id] = Task { @MainActor in
             await body()
             activeTurns[id] = nil
+            TurnRuntimeKeeper.end(sessionID: id)
+            let preview = session.orderedMessages
+                .last(where: { $0.role == .assistant })
+                .map { String($0.content.prefix(200)) } ?? "Reply ready"
+            await TurnRuntimeKeeper.notifyCompletionIfNeeded(
+                sessionID: id, title: session.title, preview: preview
+            )
         }
     }
 
