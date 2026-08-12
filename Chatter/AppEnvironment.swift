@@ -214,7 +214,17 @@ final class AppEnvironment {
         for sessionID in activeTurns.keys where !publishedHandoffs.contains(sessionID) {
             let descriptor = FetchDescriptor<ChatSession>(predicate: #Predicate { $0.id == sessionID })
             guard let session = try? context.fetch(descriptor).first else { continue }
-            await HandoffChannel.create(HandoffRequest(sessionID: sessionID, sessionTitle: session.title))
+            // The prompt rides in the record: this device's SwiftData export
+            // pauses once backgrounded, so the server cannot rely on the
+            // user message having synced. Image prompts stay local-only —
+            // attachments cannot travel in the record.
+            guard let prompt = session.orderedMessages.last(where: { $0.role == .user }),
+                  prompt.imageAttachments.isEmpty else { continue }
+            var request = HandoffRequest(sessionID: sessionID, sessionTitle: session.title)
+            request.promptMessageID = prompt.id
+            request.promptText = prompt.content
+            request.promptOrderIndex = prompt.orderIndex
+            await HandoffChannel.create(request)
             publishedHandoffs.insert(sessionID)
         }
     }

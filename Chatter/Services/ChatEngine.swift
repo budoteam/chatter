@@ -84,12 +84,38 @@ final class ChatEngine {
         try await runTurns(model: model, session: session, agent: agent, context: context)
     }
 
+    /// Runs the assistant turn for a handoffed request whose user prompt
+    /// never reached this device: the requesting phone's SwiftData export
+    /// pauses while it is backgrounded, so the message cannot be expected in
+    /// the local store. The prompt joins the model context ephemerally and
+    /// is NOT persisted here — the phone's own copy syncs when it next
+    /// foregrounds, so persisting would duplicate the bubble. The first
+    /// assistant message skips the prompt's `orderIndex` slot, which the
+    /// incoming copy will then claim without a collision.
+    func runHandoffTurn(
+        prompt: String,
+        promptOrderIndex: Int,
+        session: ChatSession,
+        agent: Agent?,
+        context: ModelContext
+    ) async throws {
+        let model = resolveModel(agent: agent, session: session)
+        guard !model.isEmpty else { throw EngineError.noModel }
+        session.modelId = model
+        session.updatedAt = .now
+        try await runTurns(
+            model: model, session: session, agent: agent, context: context,
+            ephemeralUserMessage: (text: prompt, orderIndex: promptOrderIndex)
+        )
+    }
+
     /// The agentic tool loop: stream → run requested tools → stream again.
     private func runTurns(
         model: String,
         session: ChatSession,
         agent: Agent?,
-        context: ModelContext
+        context: ModelContext,
+        ephemeralUserMessage: (text: String, orderIndex: Int)? = nil
     ) async throws {
         // Tool schemas for this agent's allowed servers.
         let resolved = mcp.tools(forServerIDs: agent?.mcpServerIDs ?? [])
@@ -225,6 +251,13 @@ final class ChatEngine {
         }
 
         var iteration = 0
+        // The ephemeral handoff prompt is the turn's newest message but is
+        // not persisted; the first assistant message must skip its
+        // orderIndex slot so the phone's syncing copy can claim it. Later
+        // rounds compute from the store, which then includes that assistant.
+        var orderIndexOverride = ephemeralUserMessage.map {
+            max(session.nextOrderIndex, $0.orderIndex + 1)
+        }
         while true {
             iteration += 1
             try Task.checkCancellation()
@@ -249,13 +282,29 @@ final class ChatEngine {
                     )
                 )
             ]
-            msgs.append(contentsOf: session.orderedMessages.map { Self.toOllama($0, includeImages: modelIsVision) })
+            if let ephemeralUserMessage {
+                // The prompt belongs between the pre-turn history and this
+                // turn's own assistant/tool messages (orderIndex is their
+                // timeline: the prompt was the phone's newest message).
+                let preTurn = session.orderedMessages.filter {
+                    $0.orderIndex < ephemeralUserMessage.orderIndex
+                }
+                let fromTurn = session.orderedMessages.filter {
+                    $0.orderIndex >= ephemeralUserMessage.orderIndex
+                }
+                msgs.append(contentsOf: preTurn.map { Self.toOllama($0, includeImages: modelIsVision) })
+                msgs.append(OllamaChatMessage(role: "user", content: ephemeralUserMessage.text))
+                msgs.append(contentsOf: fromTurn.map { Self.toOllama($0, includeImages: modelIsVision) })
+            } else {
+                msgs.append(contentsOf: session.orderedMessages.map { Self.toOllama($0, includeImages: modelIsVision) })
+            }
 
             // Live assistant message the view streams into.
             let assistant = Message(
                 role: .assistant, content: "",
-                orderIndex: session.nextOrderIndex, isStreaming: true
+                orderIndex: orderIndexOverride ?? session.nextOrderIndex, isStreaming: true
             )
+            orderIndexOverride = nil
             assistant.session = session
             context.insert(assistant)
 

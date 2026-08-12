@@ -73,6 +73,15 @@ final class HandoffServer {
         }
         context.saveOrLog()
 
+        // The requesting phone's SwiftData export pauses in the background,
+        // so the prompt this turn answers may never have synced. If it is
+        // missing, run with the record's ephemeral copy — regenerating
+        // against the stale store would re-answer the last SYNCED user
+        // message (observed 2026-08-12: old question answered twice).
+        let promptSynced = request.promptMessageID.map { promptID in
+            session.orderedMessages.contains { $0.id == promptID }
+        } ?? false
+
         // Heartbeat against stale-claim takeovers. Created inside the turn
         // closure: `runTurn` returns immediately (it enqueues the turn task)
         // and no-ops without calling the closure when a turn is already
@@ -90,9 +99,17 @@ final class HandoffServer {
             defer { heartbeat.cancel() }
             var preview: String
             do {
-                try await environment.engine.regenerate(
-                    session: session, agent: session.agent, context: context
-                )
+                if request.promptMessageID == nil || promptSynced {
+                    try await environment.engine.regenerate(
+                        session: session, agent: session.agent, context: context
+                    )
+                } else {
+                    try await environment.engine.runHandoffTurn(
+                        prompt: request.promptText,
+                        promptOrderIndex: request.promptOrderIndex,
+                        session: session, agent: session.agent, context: context
+                    )
+                }
                 preview = session.orderedMessages
                     .last(where: { $0.role == .assistant })
                     .map { String($0.content.prefix(200)) } ?? ""

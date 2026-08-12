@@ -12,16 +12,18 @@
 > erschienen auf dem Mac erst nach dem nächsten Öffnen der iOS-App).
 >
 > **Vor dem nächsten TestFlight-Release:** Der Record-Type `HandoffRequest`
-> (plain, kein `CD_`-Prefix) ist neu → einmal mit einem Debug-Build einen
-> Request schreiben (damit landet der Type in Development), dann CloudKit
-> Console → Schema → Deploy Schema Changes to Production (Prozedur in
-> AGENTS.md). Kein manueller Index nötig: Die Query prädikatiert auf das
-> Custom-Feld `createdAt` (von JIT automatisch queryable), nicht
-> `NSPredicate(value: true)` — das bräuchte einen manuellen
-> `recordName`-Index, den JIT nie setzt. Die alte v1-Subscription
-> `handoff-requests` wird beim ersten Lauf automatisch gelöscht und durch
-> `handoff-requests-v2` ersetzt; alte `CD_HandoffRequest`-Records im
-> Container sind Waisen und stören nicht.
+> (plain, kein `CD_`-Prefix) ist neu, und v3.1 ergänzt die Felder
+> `promptMessageID` / `promptText` / `promptOrderIndex` → einmal mit einem
+> Debug-Build einen Request schreiben (damit landen Type und Felder in
+> Development), dann CloudKit Console → Schema → Deploy Schema Changes to
+> Production (Prozedur in AGENTS.md; ein Write mit unbekannten Feldern
+> schlägt in Production fehl, solange nicht deployt wurde). Kein manueller
+> Index nötig: Die Query prädikatiert auf das Custom-Feld `createdAt` (von
+> JIT automatisch queryable), nicht `NSPredicate(value: true)` — das
+> bräuchte einen manuellen `recordName`-Index, den JIT nie setzt. Die alte
+> v1-Subscription `handoff-requests` wird beim ersten Lauf automatisch
+> gelöscht und durch `handoff-requests-v2` ersetzt; alte
+> `CD_HandoffRequest`-Records im Container sind Waisen und stören nicht.
 
 ## Grundidee
 
@@ -43,6 +45,18 @@ direkte Writes laufen, solange der Prozess lebt — und genau das garantiert
 der `TurnRuntimeKeeper` während eines Turns. Die eigentlichen Chat-Daten
 (Messages etc.) syncen weiterhin über SwiftData — der Server schreibt sie
 auf dem Mac, wo die App nicht suspendiert.
+
+**Prompt reist im Record mit:** Dasselbe Mirroring-Problem gilt für die
+User-Message selbst — sie ist beim Claim oft noch nicht zum Mac gesynct
+(beobachtet 2026-08-12: `regenerate` beantwortete sonst die letzte
+*gesyncte* Frage erneut). Der Request trägt deshalb `promptMessageID` /
+`promptText` / `promptOrderIndex`. Hat der Server die Message noch nicht,
+läuft der Turn mit einer **ephemeren** Kopie (`ChatEngine.runHandoffTurn`)
+— sie wird nicht persistiert, weil die iPhone-Kopie beim nächsten
+Öffnen nachsynct (sonst Doppel-Bubble); die erste Assistant-Message
+überspringt den `orderIndex`-Slot des Prompts, den die nachsynkende Kopie
+kollisionsfrei einnimmt. Prompts mit Bildern bekommen keinen Request
+(Attachments passen nicht in den Record) — solche Turns bleiben lokal.
 
 ## Ablauf
 

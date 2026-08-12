@@ -41,6 +41,17 @@ struct HandoffRequest: Equatable {
     /// Set once a device posted the completion notification (dedup).
     var notifiedAt: Date?
 
+    /// The user message this turn answers, carried in the record itself:
+    /// the requesting phone's SwiftData export pauses in the background, so
+    /// the server cannot rely on the message having synced — without these,
+    /// a claimed turn would re-answer the last SYNCED user message instead.
+    /// nil/empty on records from older clients (server falls back to
+    /// `regenerate`). Prompts with image attachments never get a request —
+    /// images cannot travel in the record.
+    var promptMessageID: UUID?
+    var promptText: String
+    var promptOrderIndex: Int
+
     init(sessionID: UUID, sessionTitle: String) {
         id = UUID()
         self.sessionID = sessionID
@@ -53,6 +64,9 @@ struct HandoffRequest: Equatable {
         completedAt = nil
         preview = ""
         notifiedAt = nil
+        promptMessageID = nil
+        promptText = ""
+        promptOrderIndex = 0
     }
 
     /// Memberwise init for `HandoffChannel`'s record decoder and tests.
@@ -60,7 +74,8 @@ struct HandoffRequest: Equatable {
         id: UUID, sessionID: UUID, requestedBy: String, sessionTitle: String,
         createdAt: Date, cancelledAt: Date? = nil, claimedBy: String = "",
         claimedAt: Date? = nil, completedAt: Date? = nil, preview: String = "",
-        notifiedAt: Date? = nil
+        notifiedAt: Date? = nil, promptMessageID: UUID? = nil,
+        promptText: String = "", promptOrderIndex: Int = 0
     ) {
         self.id = id
         self.sessionID = sessionID
@@ -73,6 +88,9 @@ struct HandoffRequest: Equatable {
         self.completedAt = completedAt
         self.preview = preview
         self.notifiedAt = notifiedAt
+        self.promptMessageID = promptMessageID
+        self.promptText = promptText
+        self.promptOrderIndex = promptOrderIndex
     }
 }
 

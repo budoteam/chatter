@@ -512,4 +512,44 @@ final class ChatEngineTests: XCTestCase {
         XCTAssertTrue(sentUser.content.contains("A red square."),
                       "regenerate still inlines the persisted description")
     }
+
+    /// Handoff turn with an unsynced prompt: the model sees the ephemeral
+    /// prompt as the newest message, no user message is persisted for it
+    /// (the phone's copy syncs later), and the assistant answer skips the
+    /// prompt's orderIndex slot so that copy lands collision-free.
+    func testHandoffTurnUsesEphemeralPromptWithoutPersistingIt() async throws {
+        let context = try makeContext()
+        let (agent, session) = makeSession(in: context)
+        let priorQuestion = Message(role: .user, content: "old question", orderIndex: 0)
+        priorQuestion.session = session
+        context.insert(priorQuestion)
+        let priorAnswer = Message(role: .assistant, content: "old answer", orderIndex: 1)
+        priorAnswer.session = session
+        context.insert(priorAnswer)
+        try context.save()
+
+        let ollama = MockOllamaService()
+        ollama.makeStream = { _, _ in self.stream(of: [.delta("new answer"), .done(reason: "stop")]) }
+        let engine = ChatEngine(ollama: ollama, mcp: MockMCPClient(), knowledge: FakeKnowledge(), artifacts: ArtifactToolProvider())
+
+        try await engine.runHandoffTurn(
+            prompt: "new question", promptOrderIndex: 2,
+            session: session, agent: agent, context: context
+        )
+
+        let sent = try XCTUnwrap(ollama.messagesPerCall.first)
+        XCTAssertEqual(sent.last?.role, "user")
+        XCTAssertEqual(sent.last?.content, "new question")
+        XCTAssertEqual(sent.map(\.role), ["system", "user", "assistant", "user"],
+                       "prompt sits after the synced history")
+        XCTAssertEqual(
+            session.orderedMessages.filter { $0.role == .user }.map(\.content),
+            ["old question"],
+            "ephemeral prompt is never persisted"
+        )
+        let answer = try XCTUnwrap(session.orderedMessages.last)
+        XCTAssertEqual(answer.role, .assistant)
+        XCTAssertEqual(answer.content, "new answer")
+        XCTAssertEqual(answer.orderIndex, 3, "slot 2 stays free for the syncing prompt copy")
+    }
 }

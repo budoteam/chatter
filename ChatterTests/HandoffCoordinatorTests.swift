@@ -1,3 +1,4 @@
+import CloudKit
 import XCTest
 @testable import Chatter
 
@@ -189,5 +190,39 @@ final class HandoffCoordinatorTests: XCTestCase {
         var unrelated = makeRequest()
         unrelated.completedAt = .now
         XCTAssertFalse(HandoffCoordinator.isStaleDuplicate(original, in: [original, unrelated]))
+    }
+
+    // MARK: - Record mapping
+
+    func testDecodeReadsPromptFields() {
+        let promptID = UUID()
+        let record = CKRecord(
+            recordType: HandoffChannel.recordType,
+            recordID: CKRecord.ID(recordName: UUID().uuidString)
+        )
+        record["sessionID"] = UUID().uuidString
+        record["promptMessageID"] = promptID.uuidString
+        record["promptText"] = "hello"
+        record["promptOrderIndex"] = 7 as NSNumber
+
+        let request = HandoffChannel.decode(record)
+
+        XCTAssertEqual(request.promptMessageID, promptID)
+        XCTAssertEqual(request.promptText, "hello")
+        XCTAssertEqual(request.promptOrderIndex, 7)
+    }
+
+    func testDecodeDefaultsPromptFieldsForLegacyRecords() {
+        let record = CKRecord(
+            recordType: HandoffChannel.recordType,
+            recordID: CKRecord.ID(recordName: UUID().uuidString)
+        )
+        record["sessionID"] = UUID().uuidString
+
+        let request = HandoffChannel.decode(record)
+
+        XCTAssertNil(request.promptMessageID, "records from older clients carry no prompt")
+        XCTAssertEqual(request.promptText, "")
+        XCTAssertEqual(request.promptOrderIndex, 0)
     }
 }

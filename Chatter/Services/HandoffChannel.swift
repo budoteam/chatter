@@ -28,6 +28,9 @@ enum HandoffChannel {
         static let completedAt = "completedAt"
         static let preview = "preview"
         static let notifiedAt = "notifiedAt"
+        static let promptMessageID = "promptMessageID"
+        static let promptText = "promptText"
+        static let promptOrderIndex = "promptOrderIndex"
     }
 
     private static let database = CKContainer(identifier: "iCloud.team.budo.chatter").privateCloudDatabase
@@ -82,6 +85,11 @@ enum HandoffChannel {
         record[Field.sessionTitle] = request.sessionTitle
         record[Field.requestedBy] = request.requestedBy
         record[Field.createdAt] = request.createdAt
+        if let promptID = request.promptMessageID {
+            record[Field.promptMessageID] = promptID.uuidString
+            record[Field.promptText] = request.promptText
+            record[Field.promptOrderIndex] = request.promptOrderIndex as NSNumber
+        }
         let saved = await save([record], policy: .ifServerRecordUnchanged, atomically: true)
         if !saved.isEmpty {
             AppLogger.data.info("Handoff requested for session \(request.sessionID.uuidString, privacy: .public)")
@@ -230,7 +238,10 @@ enum HandoffChannel {
             claimedAt: record[Field.claimedAt] as? Date,
             completedAt: record[Field.completedAt] as? Date,
             preview: record[Field.preview] as? String ?? "",
-            notifiedAt: record[Field.notifiedAt] as? Date
+            notifiedAt: record[Field.notifiedAt] as? Date,
+            promptMessageID: (record[Field.promptMessageID] as? String).flatMap(UUID.init(uuidString:)),
+            promptText: record[Field.promptText] as? String ?? "",
+            promptOrderIndex: record[Field.promptOrderIndex] as? Int ?? 0
         )
     }
 
