@@ -13,15 +13,15 @@
 >
 > **Vor dem nächsten TestFlight-Release:** Der Record-Type `HandoffRequest`
 > (plain, kein `CD_`-Prefix) ist neu → einmal mit einem Debug-Build einen
-> Request schreiben (damit landet der Type in Development), dann in der
-> CloudKit Console unter Schema → Record Types → `HandoffRequest` → Indexes
-> den Index **`recordName` → Queryable** hinzufügen (JIT-Schema setzt das
-> Systemfeld nicht automatisch; ohne ihn schlägt jede Query mit «Field
-> 'recordName' is not marked queryable» fehl), danach Schema → Deploy
-> Schema Changes to Production (Prozedur in AGENTS.md). Die alte
-> v1-Subscription `handoff-requests` wird beim ersten Lauf automatisch
-> gelöscht und durch `handoff-requests-v2` ersetzt; alte
-> `CD_HandoffRequest`-Records im Container sind Waisen und stören nicht.
+> Request schreiben (damit landet der Type in Development), dann CloudKit
+> Console → Schema → Deploy Schema Changes to Production (Prozedur in
+> AGENTS.md). Kein manueller Index nötig: Die Query prädikatiert auf das
+> Custom-Feld `createdAt` (von JIT automatisch queryable), nicht
+> `NSPredicate(value: true)` — das bräuchte einen manuellen
+> `recordName`-Index, den JIT nie setzt. Die alte v1-Subscription
+> `handoff-requests` wird beim ersten Lauf automatisch gelöscht und durch
+> `handoff-requests-v2` ersetzt; alte `CD_HandoffRequest`-Records im
+> Container sind Waisen und stören nicht.
 
 ## Grundidee
 

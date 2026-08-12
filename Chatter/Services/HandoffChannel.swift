@@ -35,16 +35,22 @@ enum HandoffChannel {
     // MARK: - Reading
 
     /// All request records in the private database, across devices. Volume
-    /// is tiny (requests are pruned), so a predicate-less query avoids any
-    /// queryable-index requirements on the custom fields. Throws on network
-    /// / account errors — callers skip their cycle rather than acting on an
-    /// empty snapshot (e.g. creating a duplicate request).
+    /// is tiny (requests are pruned), so a single unfiltered query suffices.
+    /// Throws on network / account errors — callers skip their cycle rather
+    /// than acting on an empty snapshot (e.g. creating a duplicate request).
     static func fetchAll() async throws -> [HandoffRequest] {
         try await fetchRecords().map(decode)
     }
 
     private static func fetchRecords() async throws -> [CKRecord] {
-        let query = CKQuery(recordType: recordType, predicate: NSPredicate(value: true))
+        // Predicate on a custom field, not NSPredicate(value: true): the
+        // latter needs a queryable index on the system field recordName,
+        // which JIT schema creation never sets — custom fields are marked
+        // queryable automatically.
+        let query = CKQuery(
+            recordType: recordType,
+            predicate: NSPredicate(format: "createdAt > %@", Date.distantPast as NSDate)
+        )
         var records: [CKRecord] = []
         var cursor: CKQueryOperation.Cursor?
         while true {
