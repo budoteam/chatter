@@ -90,7 +90,11 @@ enum TurnRuntimeKeeper {
     /// userInfo key.
     static func notifyCompletionIfNeeded(sessionID: UUID, title: String, preview: String) async {
         #if os(iOS)
-        let inBackground = UIApplication.shared.applicationState != .active
+        // Only a truly backgrounded app warrants a banner. `!= .active` is
+        // too eager on iPadOS windowing: a visible but unfocused window is
+        // foregroundInactive, so `applicationState` reads .inactive while
+        // the user is looking right at the app — banner + sound on screen.
+        let inBackground = UIApplication.shared.applicationState == .background
         #elseif os(macOS)
         let inBackground = !NSApplication.shared.isActive
         #else
