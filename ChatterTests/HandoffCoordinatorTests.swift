@@ -1,157 +1,193 @@
-import SwiftData
 import XCTest
 @testable import Chatter
 
 /// Claim/eligibility rules for the CloudKit handoff (SERVER-HANDOFF.md).
+/// The rules are pure filters over `HandoffRequest` values; all CloudKit
+/// I/O lives in `HandoffChannel` and is not unit-tested.
 final class HandoffCoordinatorTests: XCTestCase {
-    private var container: ModelContainer!
-
-    override func setUpWithError() throws {
-        // Tests run hosted in the app process: an in-memory store must opt
-        // out of CloudKit explicitly, otherwise the first save crashes with
-        // "No eligible connection available".
-        container = try ModelContainer(
-            for: Schema([HandoffRequest.self]),
-            configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
-        )
-    }
-
-    @MainActor
     private func makeRequest(age: TimeInterval = 90) -> HandoffRequest {
-        let request = HandoffRequest(sessionID: UUID(), sessionTitle: "Test")
+        var request = HandoffRequest(sessionID: UUID(), sessionTitle: "Test")
         request.createdAt = Date(timeIntervalSinceNow: -age)
-        container.mainContext.insert(request)
         return request
     }
 
     // MARK: - isEligibleForClaim
 
-    @MainActor
     func testFreshRequestIsInsideGracePeriod() {
         let request = makeRequest(age: HandoffCoordinator.claimGrace - 1)
         XCTAssertFalse(HandoffCoordinator.isEligibleForClaim(request))
     }
 
-    @MainActor
     func testUnclaimedRequestPastGraceIsEligible() {
         let request = makeRequest(age: HandoffCoordinator.claimGrace + 1)
         XCTAssertTrue(HandoffCoordinator.isEligibleForClaim(request))
     }
 
-    @MainActor
     func testCancelledRequestIsNotEligible() {
-        let request = makeRequest()
+        var request = makeRequest()
         request.cancelledAt = .now
         XCTAssertFalse(HandoffCoordinator.isEligibleForClaim(request))
     }
 
-    @MainActor
     func testCompletedRequestIsNotEligible() {
-        let request = makeRequest()
+        var request = makeRequest()
         request.completedAt = .now
         XCTAssertFalse(HandoffCoordinator.isEligibleForClaim(request))
     }
 
-    @MainActor
     func testLiveClaimBlocksOtherServers() {
-        let request = makeRequest()
+        var request = makeRequest()
         request.claimedBy = "other-mac"
         request.claimedAt = Date(timeIntervalSinceNow: -60)
         XCTAssertFalse(HandoffCoordinator.isEligibleForClaim(request))
     }
 
-    @MainActor
     func testStaleClaimCanBeTakenOver() {
-        let request = makeRequest()
+        var request = makeRequest()
         request.claimedBy = "crashed-mac"
         request.claimedAt = Date(timeIntervalSinceNow: -(HandoffCoordinator.staleClaim + 1))
         XCTAssertTrue(HandoffCoordinator.isEligibleForClaim(request))
     }
 
-    @MainActor
     func testRequestOlderThanMaxAgeIsDead() {
         let request = makeRequest(age: HandoffCoordinator.maxAge + 1)
         XCTAssertFalse(HandoffCoordinator.isEligibleForClaim(request))
     }
 
-    // MARK: - Query helpers
+    // MARK: - Filters
 
-    @MainActor
-    func testCancelOpenRequestsOnlyTouchesOpenOnes() throws {
-        let context = container.mainContext
+    func testCancellableRequestsOnlyTouchesOpenOnes() {
         let open = makeRequest()
-        let claimed = makeRequest()
+        var claimed = makeRequest()
         claimed.claimedBy = "some-mac"
         claimed.claimedAt = .now
-        let done = makeRequest()
+        var done = makeRequest()
         done.completedAt = .now
 
-        HandoffCoordinator.cancelOpenRequests(context: context)
+        let targets = HandoffCoordinator.cancellableRequests(
+            in: [open, claimed, done], ownDevice: AppSettings.deviceID
+        ).map(\.id)
 
-        XCTAssertNotNil(open.cancelledAt)
-        XCTAssertNotNil(claimed.cancelledAt, "claimed-but-unfinished is withdrawn too; the server still reports completion")
-        XCTAssertNil(done.cancelledAt, "completed requests stay untouched")
+        XCTAssertTrue(targets.contains(open.id))
+        XCTAssertTrue(targets.contains(claimed.id), "claimed-but-unfinished is withdrawn too; the server still reports completion")
+        XCTAssertFalse(targets.contains(done.id), "completed requests stay untouched")
     }
 
-    @MainActor
-    func testCancelOpenRequestsScopedToSession() throws {
-        let context = container.mainContext
+    func testCancellableRequestsScopedToSession() {
         let target = makeRequest()
         let other = makeRequest()
 
-        HandoffCoordinator.cancelOpenRequests(sessionID: target.sessionID, context: context)
+        let targets = HandoffCoordinator.cancellableRequests(
+            in: [target, other], ownDevice: AppSettings.deviceID, sessionID: target.sessionID
+        ).map(\.id)
 
-        XCTAssertNotNil(target.cancelledAt)
-        XCTAssertNil(other.cancelledAt)
+        XCTAssertEqual(targets, [target.id])
     }
 
-    @MainActor
-    func testCompletedUnnotifiedSkipsNotifiedAndOpen() throws {
-        let context = container.mainContext
+    func testCancellableRequestsLeavesOtherDevicesUntouched() {
+        let own = makeRequest()
+        var foreign = makeRequest()
+        foreign.requestedBy = "another-device"
+
+        let targets = HandoffCoordinator.cancellableRequests(
+            in: [own, foreign], ownDevice: AppSettings.deviceID
+        ).map(\.id)
+
+        XCTAssertEqual(targets, [own.id], "withdrawal only touches this device's own requests")
+    }
+
+    func testCompletedUnnotifiedSkipsNotifiedAndOpen() {
         let pending = makeRequest()
-        _ = pending
-        let notified = makeRequest()
+        var notified = makeRequest()
         notified.completedAt = .now
         notified.notifiedAt = .now
-        let fresh = makeRequest()
+        var fresh = makeRequest()
         fresh.completedAt = .now
 
-        let results = HandoffCoordinator.completedUnnotified(context: context)
+        let results = HandoffCoordinator.completedUnnotified(in: [pending, notified, fresh])
         XCTAssertEqual(results.map(\.id), [fresh.id])
     }
 
-    @MainActor
-    func testCancelOpenRequestsLeavesOtherDevicesUntouched() throws {
-        let context = container.mainContext
-        let own = makeRequest()
-        let foreign = makeRequest()
-        foreign.requestedBy = "another-device"
-
-        HandoffCoordinator.cancelOpenRequests(context: context)
-
-        XCTAssertNotNil(own.cancelledAt)
-        XCTAssertNil(foreign.cancelledAt, "withdrawal only touches this device's own requests")
-    }
-
-    @MainActor
     func testRequestStampsRequestingDevice() {
         let request = makeRequest()
         XCTAssertEqual(request.requestedBy, AppSettings.deviceID)
     }
 
-    @MainActor
-    func testPruneDeletesOnlyExpiredRequests() throws {
-        let context = container.mainContext
-        let oldCompleted = makeRequest()
+    func testPrunableKeepsOnlyExpiredRequests() {
+        var oldCompleted = makeRequest()
         oldCompleted.completedAt = Date(timeIntervalSinceNow: -(HandoffCoordinator.completedRetention + 1))
         let deadUnclaimed = makeRequest(age: HandoffCoordinator.maxAge + 1)
         let alive = makeRequest()
-        let recentlyCompleted = makeRequest()
+        var recentlyCompleted = makeRequest()
         recentlyCompleted.completedAt = .now
 
-        HandoffCoordinator.prune(context: context)
+        let prunable = HandoffCoordinator.prunable(
+            in: [oldCompleted, deadUnclaimed, alive, recentlyCompleted]
+        ).map(\.id)
 
-        let remaining = try context.fetch(FetchDescriptor<HandoffRequest>()).map(\.id)
-        XCTAssertEqual(Set(remaining), Set([alive.id, recentlyCompleted.id]))
+        XCTAssertEqual(Set(prunable), Set([oldCompleted.id, deadUnclaimed.id]))
+    }
+
+    func testClaimedRequestRequiresOpenRequestWithClaim() {
+        var claimed = makeRequest()
+        claimed.claimedBy = "some-mac"
+        var cancelledClaim = makeRequest()
+        cancelledClaim.claimedBy = "some-mac"
+        cancelledClaim.cancelledAt = .now
+        let unclaimed = makeRequest()
+
+        XCTAssertEqual(
+            HandoffCoordinator.claimedRequest(for: claimed.sessionID, in: [claimed, cancelledClaim, unclaimed])?.id,
+            claimed.id
+        )
+        XCTAssertNil(HandoffCoordinator.claimedRequest(for: cancelledClaim.sessionID, in: [claimed, cancelledClaim, unclaimed]))
+        XCTAssertNil(HandoffCoordinator.claimedRequest(for: unclaimed.sessionID, in: [claimed, cancelledClaim, unclaimed]))
+    }
+
+    // MARK: - isStaleDuplicate
+
+    private func makeDuplicate(of request: HandoffRequest, age: TimeInterval = 90) -> HandoffRequest {
+        var duplicate = makeRequest(age: age)
+        duplicate.sessionID = request.sessionID
+        return duplicate
+    }
+
+    func testRequestCompletedAfterCreationMarksDuplicate() {
+        let original = makeRequest()
+        var completed = makeDuplicate(of: original)
+        completed.completedAt = .now
+        XCTAssertTrue(HandoffCoordinator.isStaleDuplicate(original, in: [original, completed]))
+    }
+
+    func testRequestCompletedBeforeCreationIsNoDuplicate() {
+        // A follow-up turn in the same session is legitimate: the previous
+        // request completed BEFORE this one was created.
+        var completed = makeRequest(age: 300)
+        completed.completedAt = Date(timeIntervalSinceNow: -200)
+        let followUp = makeDuplicate(of: completed)
+        XCTAssertFalse(HandoffCoordinator.isStaleDuplicate(followUp, in: [completed, followUp]))
+    }
+
+    func testLiveClaimOnSiblingMarksDuplicate() {
+        let original = makeRequest()
+        var claimedSibling = makeDuplicate(of: original)
+        claimedSibling.claimedBy = "some-mac"
+        claimedSibling.claimedAt = .now
+        XCTAssertTrue(HandoffCoordinator.isStaleDuplicate(original, in: [original, claimedSibling]))
+    }
+
+    func testStaleClaimOnSiblingAllowsTakeover() {
+        let original = makeRequest()
+        var crashedSibling = makeDuplicate(of: original)
+        crashedSibling.claimedBy = "crashed-mac"
+        crashedSibling.claimedAt = Date(timeIntervalSinceNow: -(HandoffCoordinator.staleClaim + 1))
+        XCTAssertFalse(HandoffCoordinator.isStaleDuplicate(original, in: [original, crashedSibling]))
+    }
+
+    func testOtherSessionsAreIgnored() {
+        let original = makeRequest()
+        var unrelated = makeRequest()
+        unrelated.completedAt = .now
+        XCTAssertFalse(HandoffCoordinator.isStaleDuplicate(original, in: [original, unrelated]))
     }
 }

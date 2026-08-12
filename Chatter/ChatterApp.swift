@@ -73,7 +73,7 @@ private final class IOSAppDelegate: NSObject, UIApplicationDelegate {
     ) -> Bool {
         // Silent pushes need registration but no user permission.
         application.registerForRemoteNotifications()
-        HandoffCoordinator.ensurePushSubscription()
+        HandoffChannel.ensurePushSubscription()
         return true
     }
 
@@ -197,7 +197,7 @@ struct ChatterApp: App {
                 .onChange(of: scenePhase) { _, phase in
                     switch phase {
                     case .background:
-                        environment.requestHandoffsForActiveTurns(context: modelContainer.mainContext)
+                        Task { await environment.requestHandoffsForActiveTurns(context: modelContainer.mainContext) }
                     case .active:
                         Task { await environment.reconcileHandoffsOnActive(context: modelContainer.mainContext) }
                     default:
