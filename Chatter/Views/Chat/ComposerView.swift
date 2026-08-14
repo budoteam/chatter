@@ -64,7 +64,9 @@ struct ComposerView: View {
                 }
             #else
             // A real UITextView so system image paste works (long-press Paste,
-            // keyboard paste button, Cmd+V); Return sends, Shift+Return breaks.
+            // keyboard paste button, Cmd+V). Software-keyboard Return inserts
+            // a newline; on hardware keyboards Return sends and Shift+Return
+            // breaks (see ComposerUITextView.pressesBegan).
             ComposerTextField(
                 text: $viewModel.inputText,
                 focused: $focused,
@@ -394,8 +396,9 @@ struct ComposerView: View {
 /// Multiline chat input backed by a real UITextView so the system paste
 /// pipeline (long-press Paste, the software keyboard's paste button, Cmd+V)
 /// works for images: an image clipboard becomes attachments while text
-/// paste keeps falling through to the field itself. Return submits;
-/// Shift+Return (hardware keyboard) inserts a line break.
+/// paste keeps falling through to the field itself. Software-keyboard
+/// Return inserts a newline; on hardware keyboards Return sends and
+/// Shift+Return inserts the line break.
 private struct ComposerTextField: UIViewRepresentable {
     @Binding var text: String
     @Binding var focused: Bool
@@ -458,18 +461,6 @@ private struct ComposerTextField: UIViewRepresentable {
 
         func textViewDidBeginEditing(_ textView: UITextView) { parent.focused = true }
         func textViewDidEndEditing(_ textView: UITextView) { parent.focused = false }
-
-        func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
-            // Software-keyboard Return. Shift+Return (hardware) arrives with
-            // the flag set by pressesBegan; a pasted lone newline arrives
-            // with isPasting set — neither may submit.
-            if text == "\n", let view = textView as? ComposerUITextView,
-               !view.isInsertingShiftNewline, !view.isPasting {
-                parent.onSubmit()
-                return false
-            }
-            return true
-        }
     }
 }
 
@@ -477,12 +468,6 @@ private final class ComposerUITextView: UITextView {
     var onSubmit: (() -> Void)?
     var onPasteImages: (([NSItemProvider]) -> Void)?
     var canAttachImages = false
-    /// Set while Shift+Return is inserting a newline so the delegate
-    /// doesn't read that newline as a submit.
-    private(set) var isInsertingShiftNewline = false
-    /// Set while a paste inserts text so a pasted lone "\n" isn't mistaken
-    /// for the Return key.
-    var isPasting = false
 
     let placeholderLabel = UILabel()
 
@@ -501,7 +486,9 @@ private final class ComposerUITextView: UITextView {
         textContainerInset = UIEdgeInsets(top: 8, left: 0, bottom: 8, right: 0)
         self.textContainer.lineFragmentPadding = 0
         isScrollEnabled = false
-        returnKeyType = .send
+        // Newline, not send: the software Return key inserts a line break
+        // (hardware Return is handled in pressesBegan).
+        returnKeyType = .default
 
         placeholderLabel.font = font
         placeholderLabel.textColor = .placeholderText
@@ -529,15 +516,13 @@ private final class ComposerUITextView: UITextView {
         isScrollEnabled = fitting.height > maxContentHeight + 1
     }
 
+    // Hardware keyboards only — software-keyboard input never arrives here.
+    // Return sends; Shift+Return falls through to UIKit's newline insertion.
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         for press in presses {
             guard press.key?.keyCode == .keyboardReturnOrEnter else { continue }
             if press.key?.modifierFlags.contains(.shift) == true {
-                // Let UIKit insert the newline; the flag keeps the delegate
-                // from treating it as a submit.
-                isInsertingShiftNewline = true
                 super.pressesBegan(presses, with: event)
-                isInsertingShiftNewline = false
             } else {
                 onSubmit?()
             }
@@ -571,9 +556,7 @@ private final class ComposerUITextView: UITextView {
             onPasteImages?(UIPasteboard.general.itemProviders)
         }
         if UIPasteboard.general.hasStrings {
-            isPasting = true
             super.paste(sender)
-            isPasting = false
         }
     }
 
