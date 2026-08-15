@@ -26,10 +26,17 @@ enum ReminderScheduler {
     }
 
     /// Schedules the notification for an entry, requesting authorization first
-    /// if needed. A denied or failed schedule only means no notification — the
-    /// reminder still exists and shows up in the system prompt.
-    static func schedule(_ entry: ReminderEntry) async {
-        guard await ensureAuthorization() else { return }
+    /// if needed. Returns whether the system accepted the request. A denied or
+    /// failed schedule only means no notification — the reminder still exists
+    /// and shows up in the system prompt. Success is logged at .notice (which
+    /// persists, unlike .info) so field diagnosis via `log show` can tell
+    /// "never scheduled" from "scheduled but not delivered".
+    @discardableResult
+    static func schedule(_ entry: ReminderEntry) async -> Bool {
+        guard await ensureAuthorization() else {
+            AppLogger.data.notice("Reminder \(entry.shortID, privacy: .public) NOT scheduled — notification authorization missing")
+            return false
+        }
         let content = UNMutableNotificationContent()
         content.title = "Chatter Reminder"
         content.body = entry.content
@@ -52,8 +59,11 @@ enum ReminderScheduler {
             // Adding with an existing identifier replaces the pending request,
             // so re-scheduling after edits or on other devices is safe.
             try await center.add(request)
+            AppLogger.data.notice("Reminder \(entry.shortID, privacy: .public) scheduled, due \(entry.dueDate, privacy: .public)")
+            return true
         } catch {
             AppLogger.data.error("Reminder notification schedule failed: \(error.localizedDescription, privacy: .public)")
+            return false
         }
     }
 
@@ -102,6 +112,7 @@ enum ReminderScheduler {
                 return false
             }
         case .denied:
+            AppLogger.data.error("Notification authorization is denied — reminders will not fire (enable in System Settings)")
             return false
         @unknown default:
             return false

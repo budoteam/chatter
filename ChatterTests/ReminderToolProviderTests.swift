@@ -18,7 +18,10 @@ final class ReminderToolProviderTests: XCTestCase {
         super.setUp()
         scheduled = []
         cancelled = []
-        provider.scheduleNotification = { [weak self] in self?.scheduled.append($0) }
+        provider.scheduleNotification = { [weak self] in
+            self?.scheduled.append($0)
+            return true
+        }
         provider.cancelNotification = { [weak self] in self?.cancelled.append($0) }
     }
 
@@ -45,22 +48,38 @@ final class ReminderToolProviderTests: XCTestCase {
         action: String? = nil,
         agentID: UUID,
         context: ModelContext
-    ) throws -> String {
+    ) async throws -> String {
         var json = #"{"content": "\#(content)", "due": "\#(due ?? futureDue())""#
         if let action { json += #", "action": "\#(action)""# }
         json += "}"
-        return try provider.call(
+        return try await provider.call(
             namespacedName: ReminderToolProvider.createToolName,
             argumentsJSON: json,
             agentID: agentID, context: context
         )
     }
 
-    func testCreateRoundTripSchedulesNotification() throws {
+    /// XCTAssertThrowsError can't await; this is the async equivalent.
+    private func assertThrowsToolError(
+        _ expected: ReminderToolProvider.ToolError,
+        _ expression: () async throws -> String,
+        file: StaticString = #filePath, line: UInt = #line
+    ) async {
+        do {
+            _ = try await expression()
+            XCTFail("expected \(expected), but the call succeeded", file: file, line: line)
+        } catch let error as ReminderToolProvider.ToolError {
+            XCTAssertEqual(error.localizedDescription, expected.localizedDescription, file: file, line: line)
+        } catch {
+            XCTFail("expected \(expected), got \(error)", file: file, line: line)
+        }
+    }
+
+    func testCreateRoundTripSchedulesNotification() async throws {
         let context = try makeContext()
         let agentID = UUID()
 
-        let result = try create("Zahnarzt anrufen", action: "Fasse die Woche zusammen", agentID: agentID, context: context)
+        let result = try await create("Zahnarzt anrufen", action: "Fasse die Woche zusammen", agentID: agentID, context: context)
 
         let entries = try context.fetch(FetchDescriptor<ReminderEntry>())
         XCTAssertEqual(entries.count, 1)
@@ -72,56 +91,95 @@ final class ReminderToolProviderTests: XCTestCase {
         XCTAssertEqual(scheduled.map(\.id), entries.map(\.id))
     }
 
-    func testCreateRejectsPastDate() throws {
+    func testCreateAdmitsWhenNotificationNotScheduled() async throws {
+        let context = try makeContext()
+        provider.scheduleNotification = { _ in false }
+
+        let result = try await create("Ohne Ton", agentID: UUID(), context: context)
+
+        XCTAssertTrue(result.contains("could NOT be scheduled"))
+        XCTAssertEqual(try context.fetch(FetchDescriptor<ReminderEntry>()).count, 1)
+    }
+
+    func testCreateRejectsPastDate() async throws {
         let context = try makeContext()
         let past = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3_600))
 
-        XCTAssertThrowsError(try create("Zu spät", due: past, agentID: UUID(), context: context)) { error in
-            guard case ReminderToolProvider.ToolError.pastDate = error else {
-                return XCTFail("expected pastDate, got \(error)")
-            }
+        await assertThrowsToolError(.pastDate(past)) {
+            try await self.create("Zu spät", due: past, agentID: UUID(), context: context)
         }
         XCTAssertEqual(try context.fetch(FetchDescriptor<ReminderEntry>()).count, 0)
         XCTAssertTrue(scheduled.isEmpty)
     }
 
-    func testCreateRejectsGarbageEmptyAndOversized() throws {
+    func testCreateRejectsGarbageEmptyAndOversized() async throws {
         let context = try makeContext()
         let agentID = UUID()
 
-        XCTAssertThrowsError(try create("Termin", due: "morgen irgendwann", agentID: agentID, context: context))
-        XCTAssertThrowsError(try create("   ", agentID: agentID, context: context))
-        XCTAssertThrowsError(try create(
-            String(repeating: "x", count: 2_001), agentID: agentID, context: context
-        ))
-        XCTAssertThrowsError(try provider.call(
-            namespacedName: ReminderToolProvider.createToolName,
-            argumentsJSON: #"{"due": "2027-01-01T09:00:00+01:00"}"#,
-            agentID: agentID, context: context
-        ))
+        await assertThrowsToolError(.invalidDate("morgen irgendwann")) {
+            try await self.create("Termin", due: "morgen irgendwann", agentID: agentID, context: context)
+        }
+        await assertThrowsToolError(.emptyContent) {
+            try await self.create("   ", agentID: agentID, context: context)
+        }
+        await assertThrowsToolError(.contentTooLong(2_001)) {
+            try await self.create(
+                String(repeating: "x", count: 2_001), agentID: agentID, context: context
+            )
+        }
+        await assertThrowsToolError(.missingArgument("content")) {
+            try await self.provider.call(
+                namespacedName: ReminderToolProvider.createToolName,
+                argumentsJSON: #"{"due": "2027-01-01T09:00:00+01:00"}"#,
+                agentID: agentID, context: context
+            )
+        }
         XCTAssertEqual(try context.fetch(FetchDescriptor<ReminderEntry>()).count, 0)
     }
 
-    func testCreateParsesFractionalSeconds() throws {
+    func testCreateParsesFractionalSeconds() async throws {
         let context = try makeContext()
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let due = formatter.string(from: Date().addingTimeInterval(3_600))
 
-        XCTAssertNoThrow(try create("Fraktional", due: due, agentID: UUID(), context: context))
+        _ = try await create("Fraktional", due: due, agentID: UUID(), context: context)
         XCTAssertEqual(try context.fetch(FetchDescriptor<ReminderEntry>()).count, 1)
     }
 
-    func testListShowsOpenRemindersOnly() throws {
+    /// ISO 8601 without a timezone designator is read as local wall time.
+    func testParseDateWithoutTimezoneIsLocal() throws {
+        var components = DateComponents()
+        components.year = 2027
+        components.month = 3
+        components.day = 10
+        components.hour = 9
+        components.minute = 30
+        components.second = 0
+        let expected = try XCTUnwrap(Calendar.current.date(from: components))
+
+        XCTAssertEqual(ReminderToolProvider.parseDate("2027-03-10T09:30:00"), expected)
+        XCTAssertEqual(ReminderToolProvider.parseDate("2027-03-10T09:30"), expected)
+    }
+
+    func testParseDateKeepsExplicitOffsets() throws {
+        // Same wall time, different offsets → different instants, both valid.
+        let zurich = try XCTUnwrap(ReminderToolProvider.parseDate("2027-03-10T09:30:00+01:00"))
+        let utc = try XCTUnwrap(ReminderToolProvider.parseDate("2027-03-10T09:30:00Z"))
+        XCTAssertEqual(zurich.timeIntervalSince(utc), -3_600)
+        XCTAssertNil(ReminderToolProvider.parseDate("garbage"))
+    }
+
+    func testListShowsOpenRemindersOnly() async throws {
         let context = try makeContext()
         let agentID = UUID()
-        _ = try create("Offen", agentID: agentID, context: context)
+        _ = try await create("Offen", agentID: agentID, context: context)
         let done = ReminderEntry(agentID: agentID, content: "Erledigt", dueDate: Date().addingTimeInterval(3_600))
         done.isCompleted = true
         context.insert(done)
         try context.save()
 
-        let result = try provider.call(
+        let result = try await provider.call(
             namespacedName: ReminderToolProvider.listToolName,
             argumentsJSON: "{}",
             agentID: agentID, context: context
@@ -130,15 +188,15 @@ final class ReminderToolProviderTests: XCTestCase {
         XCTAssertFalse(result.contains("Erledigt"))
     }
 
-    func testCompleteAndDeleteCancelNotification() throws {
+    func testCompleteAndDeleteCancelNotification() async throws {
         let context = try makeContext()
         let agentID = UUID()
-        _ = try create("Eins", agentID: agentID, context: context)
-        _ = try create("Zwei", agentID: agentID, context: context)
+        _ = try await create("Eins", agentID: agentID, context: context)
+        _ = try await create("Zwei", agentID: agentID, context: context)
         let entries = try context.fetch(FetchDescriptor<ReminderEntry>())
         XCTAssertEqual(entries.count, 2)
 
-        _ = try provider.call(
+        _ = try await provider.call(
             namespacedName: ReminderToolProvider.completeToolName,
             argumentsJSON: #"{"id": "\#(entries[0].shortID)"}"#,
             agentID: agentID, context: context
@@ -146,7 +204,7 @@ final class ReminderToolProviderTests: XCTestCase {
         XCTAssertTrue(entries[0].isCompleted)
         XCTAssertEqual(cancelled, [entries[0].id])
 
-        _ = try provider.call(
+        _ = try await provider.call(
             namespacedName: ReminderToolProvider.deleteToolName,
             argumentsJSON: #"{"id": "\#(String(entries[1].shortID.prefix(4)))"}"#,
             agentID: agentID, context: context
@@ -155,41 +213,41 @@ final class ReminderToolProviderTests: XCTestCase {
         XCTAssertEqual(Set(cancelled), Set(entries.map(\.id)))
     }
 
-    func testUnknownIDThrows() throws {
+    func testUnknownIDThrows() async throws {
         let context = try makeContext()
-        XCTAssertThrowsError(try provider.call(
-            namespacedName: ReminderToolProvider.completeToolName,
-            argumentsJSON: #"{"id": "deadbeef"}"#,
-            agentID: UUID(), context: context
-        )) { error in
-            guard case ReminderToolProvider.ToolError.entryNotFound = error else {
-                return XCTFail("expected entryNotFound, got \(error)")
-            }
+        await assertThrowsToolError(.entryNotFound("deadbeef")) {
+            try await self.provider.call(
+                namespacedName: ReminderToolProvider.completeToolName,
+                argumentsJSON: #"{"id": "deadbeef"}"#,
+                agentID: UUID(), context: context
+            )
         }
     }
 
-    func testEntriesAreScopedPerAgent() throws {
+    func testEntriesAreScopedPerAgent() async throws {
         let context = try makeContext()
         let agentA = UUID()
         let agentB = UUID()
-        _ = try create("As Erinnerung", agentID: agentA, context: context)
+        _ = try await create("As Erinnerung", agentID: agentA, context: context)
 
         // B's prompt must not leak A's reminders, and B can't touch A's entry.
         let sectionB = provider.systemPromptSection(agentID: agentB, context: context)
         XCTAssertFalse(sectionB.contains("As Erinnerung"))
 
         let entry = try XCTUnwrap(context.fetch(FetchDescriptor<ReminderEntry>()).first)
-        XCTAssertThrowsError(try provider.call(
-            namespacedName: ReminderToolProvider.deleteToolName,
-            argumentsJSON: #"{"id": "\#(entry.shortID)"}"#,
-            agentID: agentB, context: context
-        ))
+        await assertThrowsToolError(.entryNotFound(entry.shortID)) {
+            try await self.provider.call(
+                namespacedName: ReminderToolProvider.deleteToolName,
+                argumentsJSON: #"{"id": "\#(entry.shortID)"}"#,
+                agentID: agentB, context: context
+            )
+        }
     }
 
-    func testPromptSectionCarriesTimeAnchorAndOpenEntries() throws {
+    func testPromptSectionCarriesTimeAnchorAndOpenEntries() async throws {
         let context = try makeContext()
         let agentID = UUID()
-        _ = try create("Milch kaufen", agentID: agentID, context: context)
+        _ = try await create("Milch kaufen", agentID: agentID, context: context)
 
         let section = provider.systemPromptSection(agentID: agentID, context: context)
         let entry = try XCTUnwrap(context.fetch(FetchDescriptor<ReminderEntry>()).first)

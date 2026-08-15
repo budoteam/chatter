@@ -29,8 +29,10 @@ final class ReminderToolProvider {
 
     /// Notification hooks, injectable for tests (UNUserNotificationCenter is
     /// not meaningful there). The defaults talk to `ReminderScheduler`.
-    var scheduleNotification: (ReminderEntry) -> Void = { entry in
-        Task { await ReminderScheduler.schedule(entry) }
+    /// `scheduleNotification` reports whether the system accepted the
+    /// request, so the tool result can admit a silently unsent notification.
+    var scheduleNotification: (ReminderEntry) async -> Bool = { entry in
+        await ReminderScheduler.schedule(entry)
     }
     var cancelNotification: (UUID) -> Void = { ReminderScheduler.cancel($0) }
 
@@ -82,8 +84,8 @@ final class ReminderToolProvider {
         You can schedule reminders for the user. They fire as system notifications \
         at their due time, even when the app is closed. Only create a reminder \
         when the user explicitly asks for one. Current local time: \
-        \(Self.promptDateFormatter.string(from: Date())) — pass `due` as ISO 8601 \
-        with timezone offset.
+        \(Self.promptDateFormatter.string(from: Date())) — pass `due` in this \
+        same ISO 8601 format, including the timezone offset.
         """
 
         if open.isEmpty {
@@ -182,7 +184,7 @@ final class ReminderToolProvider {
         argumentsJSON: String,
         agentID: UUID?,
         context: ModelContext
-    ) throws -> String {
+    ) async throws -> String {
         let args = JSONValue.parse(argumentsJSON).stringArguments
 
         switch namespacedName {
@@ -206,8 +208,12 @@ final class ReminderToolProvider {
             let entry = ReminderEntry(agentID: agentID, content: content, dueDate: due, actionPrompt: action)
             context.insert(entry)
             context.saveOrLog()
-            scheduleNotification(entry)
-            return "Scheduled reminder [\(entry.shortID)] for \(Self.dueFormatter.string(from: due))."
+            let scheduled = await scheduleNotification(entry)
+            var reply = "Scheduled reminder [\(entry.shortID)] for \(Self.dueFormatter.string(from: due))."
+            if !scheduled {
+                reply += " However, the system notification could NOT be scheduled (notification permission missing or a system error) — tell the user to check Chatter under Settings → Notifications, and that this reminder will not fire."
+            }
+            return reply
 
         case Self.listToolName:
             let open = entries(for: agentID, context: context)
@@ -266,10 +272,14 @@ final class ReminderToolProvider {
         return (try? context.fetch(descriptor)) ?? []
     }
 
-    /// ISO 8601 with timezone; also accepts fractional seconds.
+    /// ISO 8601 with timezone; also accepts fractional seconds. A value
+    /// without a timezone designator is read as local wall time — models
+    /// regularly omit the offset, and the prompt anchor is local time.
     static func parseDate(_ raw: String) -> Date? {
         if let date = Self.isoFormatter.date(from: raw) { return date }
-        return Self.isoFractionalFormatter.date(from: raw)
+        if let date = Self.isoFractionalFormatter.date(from: raw) { return date }
+        if let date = Self.localFormatter.date(from: raw) { return date }
+        return Self.localShortFormatter.date(from: raw)
     }
 
     private static let isoFormatter: ISO8601DateFormatter = {
@@ -284,16 +294,37 @@ final class ReminderToolProvider {
         return formatter
     }()
 
+    /// "yyyy-MM-dd'T'HH:mm:ss" in the current (local) timezone.
+    private static let localFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        return formatter
+    }()
+
+    /// "yyyy-MM-dd'T'HH:mm" in the current (local) timezone.
+    private static let localShortFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm"
+        return formatter
+    }()
+
     private static let dueFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "dd.MM.yyyy HH:mm"
         return formatter
     }()
 
-    /// Date, time and timezone — the anchor for the model's relative dates.
-    private static let promptDateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "dd.MM.yyyy HH:mm:ss (z)"
+    /// The anchor for the model's relative dates, in exactly the ISO 8601
+    /// format (with offset) that `due` expects — the model can then resolve
+    /// "in 20 minutes" by simple arithmetic instead of converting "MESZ".
+    private static let promptDateFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        formatter.timeZone = .current
         return formatter
     }()
 }

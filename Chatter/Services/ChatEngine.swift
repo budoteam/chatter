@@ -430,7 +430,7 @@ final class ChatEngine {
                             agent: agent, context: context
                         )
                     } else if reminderToolNames.contains(name) {
-                        result = try reminders.call(
+                        result = try await reminders.call(
                             namespacedName: name, argumentsJSON: argsJSON,
                             agentID: agent?.id, context: context
                         )
