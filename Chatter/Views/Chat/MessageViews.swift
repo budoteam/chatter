@@ -106,6 +106,9 @@ struct AssistantMessage: View {
     /// group (final answer of a tool loop) — rendering the trace here too
     /// would duplicate it.
     var showsThinking: Bool = true
+    /// Non-nil turns ```choices fences into tappable quick-reply chips;
+    /// only the newest, fully streamed answer gets one (see ChatView).
+    var onChoice: ((String) -> Void)? = nil
 
     private var agent: Agent? { message.session?.agent }
     private var thinking: String { message.thinking ?? "" }
@@ -129,7 +132,7 @@ struct AssistantMessage: View {
                 if message.content.isEmpty && message.isStreaming && thinking.isEmpty {
                     TypingIndicator().padding(.top, 6)
                 } else if !message.content.isEmpty {
-                    MarkdownText(text: message.content)
+                    MarkdownText(text: message.content, onChoice: onChoice)
                         .font(Theme.Typography.font(.body))
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }

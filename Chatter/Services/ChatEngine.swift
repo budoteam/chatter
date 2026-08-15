@@ -511,9 +511,23 @@ final class ChatEngine {
         if let memorySection { parts.append(memorySection) }
         if let remindersSection { parts.append(remindersSection) }
         if let artifactSection { parts.append(artifactSection) }
+        parts.append(Self.choicesSection)
         parts.append(timestamp)
         return parts.joined(separator: "\n\n")
     }
+
+    /// Quick-reply convention: a ```choices fence in the newest answer is
+    /// rendered by the chat UI as tappable buttons; a tap sends the option
+    /// text as the user's reply (pure UI — no tool call involved).
+    private static let choicesSection = """
+        # Quick-reply buttons
+        When you ask the user to pick from a few (2–5) clear, short options, end \
+        your reply with a fenced ```choices block listing exactly one option per \
+        line and nothing else. The chat renders it as tappable buttons. Phrase \
+        options as the user would answer (e.g. "Yes, send it" / "No, edit first"), \
+        never use the block for open-ended questions, and never more than once \
+        per reply.
+        """
 
     private func resolveModel(agent: Agent?, session: ChatSession) -> String {
         if !session.modelOverride.isEmpty { return session.modelOverride }

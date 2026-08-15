@@ -294,12 +294,29 @@ struct ChatView: View {
             )
         case .answer(let message, let showsThinking):
             VStack(alignment: .leading, spacing: 2) {
-                AssistantMessage(message: message, showsThinking: showsThinking)
+                AssistantMessage(
+                    message: message,
+                    showsThinking: showsThinking,
+                    onChoice: choiceHandler(for: message)
+                )
                 if !message.isStreaming {
                     // Indented past the agent badge so it aligns with the text.
                     actionBar(for: message).padding(.leading, 36)
                 }
             }
+        }
+    }
+
+    /// Quick-reply chips live only on the newest, fully streamed answer:
+    /// mid-stream they'd flicker, and on older turns they'd be dead ends
+    /// (the conversation has moved on). The tap goes through the same send
+    /// path as the composer.
+    private func choiceHandler(for message: Message) -> ((String) -> Void)? {
+        guard message.id == session.orderedMessages.last?.id,
+              !message.isStreaming, !env.isSending(session) else { return nil }
+        return { option in
+            viewModel.inputText = option
+            send()
         }
     }
 

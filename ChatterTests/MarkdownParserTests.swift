@@ -63,4 +63,36 @@ final class MarkdownParserTests: XCTestCase {
         XCTAssertEqual(SVGView.aspectRatio(of: #"<svg width="320" height="160"></svg>"#), 2.0)
         XCTAssertNil(SVGView.aspectRatio(of: "<svg></svg>"))
     }
+
+    // MARK: - choices fences (quick-reply buttons)
+
+    func testChoicesFenceBecomesChoicesBlock() {
+        let blocks = MarkdownParser.parse("Pick one:\n\n```choices\nYes\nNo\nMaybe so\n```")
+        guard blocks.count == 2, case .paragraph = blocks[0],
+              case .choices(let options) = blocks[1] else {
+            return XCTFail("expected paragraph + choices, got \(blocks)")
+        }
+        XCTAssertEqual(options, ["Yes", "No", "Maybe so"])
+    }
+
+    func testChoicesFenceIsCaseInsensitiveAndTrims() {
+        let blocks = MarkdownParser.parse("```Choices\n  A  \n\nB\n```")
+        guard blocks.count == 1, case .choices(let options) = blocks[0] else {
+            return XCTFail("expected choices, got \(blocks)")
+        }
+        XCTAssertEqual(options, ["A", "B"])
+    }
+
+    func testChoicesFenceCapsAtSixOptions() {
+        let blocks = MarkdownParser.parse("```choices\nA\nB\nC\nD\nE\nF\nG\nH\n```")
+        guard blocks.count == 1, case .choices(let options) = blocks[0] else {
+            return XCTFail("expected choices, got \(blocks)")
+        }
+        XCTAssertEqual(options, ["A", "B", "C", "D", "E", "F"])
+    }
+
+    func testEmptyChoicesFenceRendersNothing() {
+        XCTAssertTrue(MarkdownParser.parse("```choices\n\n```").isEmpty)
+        XCTAssertTrue(MarkdownParser.parse("```choices\n```").isEmpty)
+    }
 }

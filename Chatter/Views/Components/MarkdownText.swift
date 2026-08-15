@@ -7,6 +7,10 @@ import SwiftUI
 /// environment so callers can restyle (e.g. secondary callout for steps).
 struct MarkdownText: View {
     let text: String
+    /// Non-nil renders `choices` blocks as tappable quick-reply chips (the
+    /// tap sends the option as the user's reply). Nil — history, streaming,
+    /// watchOS — falls back to a plain bullet list.
+    var onChoice: ((String) -> Void)? = nil
 
     var body: some View {
         let blocks = Self.parsedBlocks(text)
@@ -40,17 +44,13 @@ struct MarkdownText: View {
             tableView(header: header, rows: rows)
 
         case .list(let ordered, let items):
-            VStack(alignment: .leading, spacing: 5) {
-                ForEach(items.indices, id: \.self) { i in
-                    HStack(alignment: .top, spacing: 8) {
-                        Text(ordered ? "\(i + 1)." : "•")
-                            .foregroundStyle(.secondary)
-                            .frame(minWidth: 16, alignment: .trailing)
-                        Text(Self.inline(items[i]))
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
+            listView(ordered: ordered, items: items)
+
+        case .choices(let options):
+            if let onChoice {
+                ChoiceChipsView(options: options, onPick: onChoice)
+            } else {
+                listView(ordered: false, items: options)
             }
 
         case .quote(let string):
@@ -77,6 +77,21 @@ struct MarkdownText: View {
         case 1: return Theme.Typography.font(.title1)
         case 2: return Theme.Typography.font(.title2)
         default: return Theme.Typography.font(.title3)
+        }
+    }
+
+    private func listView(ordered: Bool, items: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            ForEach(items.indices, id: \.self) { i in
+                HStack(alignment: .top, spacing: 8) {
+                    Text(ordered ? "\(i + 1)." : "•")
+                        .foregroundStyle(.secondary)
+                        .frame(minWidth: 16, alignment: .trailing)
+                    Text(Self.inline(items[i]))
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
         }
     }
 
@@ -185,6 +200,9 @@ enum MarkdownBlock {
     case quote(String)
     case image(alt: String, url: String)
     case divider
+    /// Quick-reply options from a ```choices fence (UI convention, see
+    /// ChatEngine's system prompt section) — rendered as tappable chips.
+    case choices([String])
 }
 
 enum MarkdownParser {
@@ -216,6 +234,18 @@ enum MarkdownParser {
                     i += 1
                 }
                 i += 1  // skip closing fence
+                // A "choices" fence is a UI convention, not code: quick-reply
+                // options, one per line (see ChatEngine's system prompt).
+                // Capped so a rambling model can't flood the chat with chips.
+                if language.lowercased() == "choices" {
+                    let options = code
+                        .map { $0.trimmingCharacters(in: .whitespaces) }
+                        .filter { !$0.isEmpty }
+                    if !options.isEmpty {
+                        blocks.append(.choices(Array(options.prefix(6))))
+                    }
+                    continue
+                }
                 blocks.append(.code(
                     language: language.isEmpty ? nil : language,
                     content: code.joined(separator: "\n")
@@ -379,5 +409,35 @@ enum MarkdownParser {
         if s.hasPrefix("|") { s.removeFirst() }
         if s.hasSuffix("|") { s.removeLast() }
         return s.components(separatedBy: "|").map { $0.trimmingCharacters(in: .whitespaces) }
+    }
+}
+
+// MARK: - Quick-reply chips
+
+/// Tappable options for a `choices` block — the tap sends the option as the
+/// user's reply. Capsule styling matches the composer's agent/model pills.
+private struct ChoiceChipsView: View {
+    let options: [String]
+    let onPick: (String) -> Void
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(options, id: \.self) { option in
+                    Button { onPick(option) } label: {
+                        Text(option)
+                            .font(Theme.Typography.font(.callout).weight(.medium))
+                            .lineLimit(1)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .background(Theme.surfaceRaised, in: Capsule())
+                            .overlay(Capsule().strokeBorder(Theme.separator, lineWidth: 1))
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.vertical, 2)
+        }
     }
 }
