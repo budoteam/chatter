@@ -9,6 +9,10 @@ struct SidebarView: View {
     @Query(sort: \Agent.createdAt) private var agents: [Agent]
     @Query(sort: \ChatSession.updatedAt, order: .reverse) private var sessions: [ChatSession]
 
+    @State private var sessionBeingRenamed: ChatSession?
+    @State private var renameText = ""
+    @State private var showDeleteAllConfirmation = false
+
     var body: some View {
         List(selection: selectionBinding) {
             if sessions.isEmpty {
@@ -27,6 +31,18 @@ struct SidebarView: View {
         #endif
         .safeAreaInset(edge: .top, spacing: 0) { newChatButton }
         .safeAreaInset(edge: .bottom, spacing: 0) { navButtons }
+        .alert("Rename Chat", isPresented: renamePresented) {
+            TextField("Title", text: $renameText)
+            Button("Cancel", role: .cancel) { sessionBeingRenamed = nil }
+            Button("Save") { commitRename() }
+        }
+        .confirmationDialog(
+            "Delete all unpinned chats? Pinned chats are kept.",
+            isPresented: $showDeleteAllConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete All", role: .destructive) { deleteAllUnpinned() }
+        }
         .navigationTitle("Chatter")
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -122,6 +138,7 @@ struct SidebarView: View {
         for session in sessions {
             hasher.combine(session.id)
             hasher.combine(session.updatedAt)
+            hasher.combine(session.isPinned)
         }
         let key = hasher.finalize()
         if key != groupCache.key || groupCache.groups.isEmpty {
@@ -132,13 +149,29 @@ struct SidebarView: View {
     }
 
     private var sessionsSection: some View {
+        Group {
         ForEach(groupedSessions, id: \.title) { group in
             Section {
                 ForEach(group.sessions) { session in
                     sessionRow(session)
                         .tag(session)
                         .contextMenu {
+                            Button { beginRename(session) } label: {
+                                Label("Rename", systemImage: "pencil")
+                            }
+                            Button { togglePin(session) } label: {
+                                Label(session.isPinned ? "Unpin" : "Pin",
+                                      systemImage: session.isPinned ? "pin.slash" : "pin")
+                            }
+                            Divider()
                             Button("Delete", role: .destructive) { delete(session) }
+                        }
+                        .swipeActions(edge: .leading) {
+                            Button { togglePin(session) } label: {
+                                Label(session.isPinned ? "Unpin" : "Pin",
+                                      systemImage: session.isPinned ? "pin.slash" : "pin")
+                            }
+                            .tint(.orange)
                         }
                         .swipeActions(edge: .trailing) {
                             Button(role: .destructive) { delete(session) } label: {
@@ -149,6 +182,16 @@ struct SidebarView: View {
             } header: {
                 sectionHeader(group.title)
             }
+        }
+        if sessions.contains(where: { !$0.isPinned }) {
+            Section {
+                Button(role: .destructive) { showDeleteAllConfirmation = true } label: {
+                    Label("Delete All Chats", systemImage: "trash")
+                        .font(Theme.Typography.font(.body))
+                        .frame(maxWidth: .infinity)
+                }
+            }
+        }
         }
     }
 
@@ -164,6 +207,11 @@ struct SidebarView: View {
                 .font(Theme.Typography.font(.body))
                 .lineLimit(1)
             Spacer(minLength: 0)
+            if session.isPinned {
+                Image(systemName: "pin.fill")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
+            }
         }
         .padding(.vertical, 2)
     }
@@ -228,6 +276,44 @@ struct SidebarView: View {
             context.saveOrLog()
         }
     }
+
+    private var renamePresented: Binding<Bool> {
+        Binding(
+            get: { sessionBeingRenamed != nil },
+            set: { if !$0 { sessionBeingRenamed = nil } }
+        )
+    }
+
+    private func beginRename(_ session: ChatSession) {
+        renameText = session.title
+        sessionBeingRenamed = session
+    }
+
+    private func commitRename() {
+        guard let session = sessionBeingRenamed else { return }
+        session.title = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+        context.saveOrLog()
+        sessionBeingRenamed = nil
+    }
+
+    private func togglePin(_ session: ChatSession) {
+        session.isPinned.toggle()
+        context.saveOrLog()
+    }
+
+    private func deleteAllUnpinned() {
+        let targets = sessions.filter { !$0.isPinned }
+        if let selected = env.selectedSession, targets.contains(selected) {
+            env.selectedSession = nil
+        }
+        Task { @MainActor in
+            for session in targets {
+                await env.cancelTurnAndWait(for: session)
+                context.delete(session)
+            }
+            context.saveOrLog()
+        }
+    }
 }
 
 /// Groups sessions into Today / Yesterday / Previous 7 Days / Older.
@@ -239,18 +325,20 @@ private struct SessionGroup {
         let cal = Calendar.current
         let now = Date()
         var buckets: [(String, [ChatSession])] = [
-            ("Today", []), ("Yesterday", []), ("Previous 7 Days", []), ("Older", []),
+            ("Pinned", []), ("Today", []), ("Yesterday", []), ("Previous 7 Days", []), ("Older", []),
         ]
         for session in sessions {
-            if cal.isDateInToday(session.updatedAt) {
+            if session.isPinned {
                 buckets[0].1.append(session)
-            } else if cal.isDateInYesterday(session.updatedAt) {
+            } else if cal.isDateInToday(session.updatedAt) {
                 buckets[1].1.append(session)
+            } else if cal.isDateInYesterday(session.updatedAt) {
+                buckets[2].1.append(session)
             } else if let days = cal.dateComponents([.day], from: session.updatedAt, to: now).day,
                       days < 7 {
-                buckets[2].1.append(session)
-            } else {
                 buckets[3].1.append(session)
+            } else {
+                buckets[4].1.append(session)
             }
         }
         return buckets.filter { !$0.1.isEmpty }.map { SessionGroup(title: $0.0, sessions: $0.1) }

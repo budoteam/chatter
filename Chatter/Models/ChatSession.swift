@@ -14,6 +14,8 @@ final class ChatSession {
     var modelId: String = ""
     /// Per-chat model pinned in the composer. Empty follows the agent's model.
     var modelOverride: String = ""
+    /// Pinned sessions sort to the top of the sidebar and survive Delete All.
+    var isPinned: Bool = false
 
     var agent: Agent?
 

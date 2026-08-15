@@ -16,6 +16,14 @@ struct WatchRootView: View {
     /// Session created from the agent picker, pushed programmatically.
     @State private var pushedSession: ChatSession?
 
+    /// Pinned sessions first, then by recency — mirrors the iOS/macOS sidebar.
+    private var sortedSessions: [ChatSession] {
+        sessions.sorted { lhs, rhs in
+            if lhs.isPinned != rhs.isPinned { return lhs.isPinned }
+            return lhs.updatedAt > rhs.updatedAt
+        }
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -24,7 +32,7 @@ struct WatchRootView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
-                ForEach(sessions) { session in
+                ForEach(sortedSessions) { session in
                     NavigationLink(value: session) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(session.title)
@@ -91,7 +99,7 @@ struct WatchRootView: View {
 
     private func deleteSessions(at offsets: IndexSet) {
         for index in offsets {
-            let session = sessions[index]
+            let session = sortedSessions[index]
             Task {
                 // Never delete underneath a running turn (engine mutates the
                 // session's messages until teardown completes).
