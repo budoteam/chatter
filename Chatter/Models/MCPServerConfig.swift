@@ -4,7 +4,6 @@ import SwiftData
 enum MCPTransportKind: String, Codable, CaseIterable, Identifiable {
     case http   // Streamable HTTP (modern MCP transport)
     case sse    // Legacy HTTP+SSE ("/sse" endpoints, supergateway/mcp-proxy)
-    case stdio  // Local subprocess (macOS only)
 
     var id: String { rawValue }
 
@@ -12,25 +11,11 @@ enum MCPTransportKind: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .http: return "Streamable HTTP"
         case .sse: return "SSE (legacy)"
-        case .stdio: return "stdio (local)"
         }
-    }
-
-    var isRemote: Bool { self == .http || self == .sse }
-
-    /// stdio spawns subprocesses: macOS only, and not possible in sandboxed
-    /// builds (TestFlight/App Store — see Chatter-macOS-Release.entitlements).
-    static var stdioAvailable: Bool {
-        #if os(macOS)
-        ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] == nil
-        #else
-        false
-        #endif
     }
 }
 
-/// User-configured MCP server. Remote servers use `url` + an optional static
-/// auth header; stdio servers (macOS) launch `command` with `args`.
+/// User-configured MCP server with `url` + an optional static auth header.
 @Model
 final class MCPServerConfig {
     var id: UUID = UUID()
@@ -40,7 +25,10 @@ final class MCPServerConfig {
     /// Optional static header, e.g. key "Authorization", value "Bearer …".
     var headerKey: String = ""
     var headerValue: String = ""
-    /// stdio: executable path and arguments (JSON-encoded array).
+    /// Legacy fields of the removed stdio transport (local subprocesses,
+    /// dropped when distribution moved to App-Store-only sandboxed builds).
+    /// Kept so the persisted CloudKit schema stays unchanged; configs synced
+    /// from an old build with transportRaw "stdio" decode as `.sse`.
     var command: String = ""
     var argsJSON: String = "[]"
     var enabled: Bool = true
@@ -63,18 +51,5 @@ final class MCPServerConfig {
     var transport: MCPTransportKind {
         get { MCPTransportKind(rawValue: transportRaw) ?? .sse }
         set { transportRaw = newValue.rawValue }
-    }
-
-    var args: [String] {
-        get {
-            guard let data = argsJSON.data(using: .utf8) else { return [] }
-            return (try? JSONDecoder().decode([String].self, from: data)) ?? []
-        }
-        set {
-            if let data = try? JSONEncoder().encode(newValue),
-               let json = String(data: data, encoding: .utf8) {
-                argsJSON = json
-            }
-        }
     }
 }

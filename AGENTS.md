@@ -76,7 +76,7 @@ No lint / format commands exist. CI is **Xcode Cloud** (no `.github/workflows`):
   - Save via `context.saveOrLog()` (extension in `Persistence.swift`) — best-effort like the former `try? context.save()`, but failures are logged via `AppLogger.data` instead of vanishing silently.
 - **CloudKit schema deploy (before any TestFlight release that adds/changes a `@Model`)**: Debug builds use the Development environment; TestFlight uses Production, updated only by manual deploy. Missing Production fields make every `RecordSave` fail and stall sync entirely (this happened with 1.4). Procedure: run a debug build once **and create one record of the new model type** (the schema is only pushed to Development on the first actual write, not on container init — e.g. create one reminder for `ReminderEntry`) → CloudKit Console → container `iCloud.team.budo.chatter` → Schema → Deploy Schema Changes to Production → then upload. Sync health is visible in Settings → iCloud Sync (`CloudSyncMonitor`).
 - **Streaming batching**: token deltas are buffered and flushed ~12 Hz. Preserve this batching when touching the streaming path.
-- **Platform diffs**: inline via `#if os(macOS)`; no separate macOS target. stdio MCP subprocess transport is macOS-only.
+- **Platform diffs**: inline via `#if os(macOS)`; no separate macOS target. MCP transports are remote only (Streamable HTTP + legacy SSE) — the former stdio subprocess transport was dropped when distribution moved to App-Store-only sandboxed builds.
 - **Commit messages**: written in German.
 - **ATS**: `NSAllowsArbitraryLoads` is intentionally `true` (self-hosted MCP over plain HTTP on LAN / Tailscale). Do not change.
 - **Project editing**: `Chatter.xcodeproj/` is gitignored and generated. Edit `project.yml`, run `./generate.sh`. Never edit the `.xcodeproj` directly. New source files under `Chatter/` are auto-globbed but require `./generate.sh` to appear in the project.
@@ -85,7 +85,7 @@ No lint / format commands exist. CI is **Xcode Cloud** (no `.github/workflows`):
 
 - **Runtime**: Swift 5 language mode; Xcode 16+ (built with Xcode 26). Deployment targets iOS 17.0, macOS 14.0.
 - **Package manager**: Swift Package Manager via Xcode (declared in `project.yml` under `packages:`). No npm / pnpm / Bun.
-- **Signing**: automatic, `DEVELOPMENT_TEAM = X9FHM3F6WK`. Distribution via Developer ID + notarization for direct download, or TestFlight/App Store.
+- **Signing**: automatic, `DEVELOPMENT_TEAM = X9FHM3F6WK`. Distribution via TestFlight/App Store only — macOS builds are sandboxed in every configuration (single `Chatter-macOS.entitlements`; the former unsandboxed Debug split existed only for the removed stdio MCP transport).
 - **Secrets**: the only runtime secret is the Ollama Cloud API key (ollama.com → Settings → API keys), entered in-app Settings, stored in Keychain (iCloud-synced). No `.env`.
 
 ## Testing & QA
@@ -94,9 +94,3 @@ No lint / format commands exist. CI is **Xcode Cloud** (no `.github/workflows`):
 - Coverage: pure codecs / transfer / tool providers (OKF round-trips must be byte-identical for canonical files, lossless otherwise), plus `ChatEngineTests` driving the tool loop against mocked `OllamaServiceProtocol` / `MCPClientProtocol` / `KnowledgeToolProviding`. No UI tests.
 - In-memory test containers must use `ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)`: tests run hosted in the app process, and the `.automatic` default hooks the in-memory store into the app's CloudKit mirroring — the first `save()` crashes with "No eligible connection available".
 - macOS quirk already handled in `project.yml`: XcodeGen emits the iOS bundle layout for `TEST_HOST`; the `TEST_HOST[sdk=macosx*]` override points at `Contents/MacOS/Chatter`, without it macOS tests can't find the host app.
-
-## macOS Sandbox Split (easy to get wrong)
-
-- **Debug** uses `Chatter-macOS.entitlements` with the App Sandbox **off** so stdio MCP servers can spawn subprocesses.
-- **Release** uses `Chatter-macOS-Release.entitlements` (set in `project.yml` configs) with the sandbox **on** — TestFlight/App Store requires it. Sandboxed builds hide the stdio transport at runtime (`MCPTransportKind.stdioAvailable`); HTTP/SSE MCP works everywhere.
-- Don't "fix" the Debug sandbox flag, and don't add capabilities to only one of the two entitlement files.

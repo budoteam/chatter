@@ -198,6 +198,9 @@ struct ChatterApp: App {
                     switch phase {
                     case .background:
                         Task { await environment.requestHandoffsForActiveTurns(context: modelContainer.mainContext) }
+                        // Arm the continued-processing Live Activity only now
+                        // that the app is actually leaving the foreground.
+                        TurnRuntimeKeeper.submitContinuedTasksForActiveTurns()
                     case .active:
                         Task { await environment.reconcileHandoffsOnActive(context: modelContainer.mainContext) }
                     default:

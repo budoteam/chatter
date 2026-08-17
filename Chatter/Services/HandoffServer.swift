@@ -7,7 +7,7 @@ import SwiftData
 /// the assistant turn locally. Always active — with no requests pending it
 /// costs one small CloudKit query per interval; CloudKit (same Apple ID) is
 /// the access control, so no toggle or pairing exists. macOS-only: the app
-/// keeps running without windows, and stdio MCP works here.
+/// keeps running without windows.
 @MainActor
 final class HandoffServer {
     private let environment: AppEnvironment

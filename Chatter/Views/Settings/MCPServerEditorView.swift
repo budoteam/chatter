@@ -14,15 +14,8 @@ struct MCPServerEditorView: View {
     @State private var url = ""
     @State private var headerKey = ""
     @State private var headerValue = ""
-    @State private var command = ""
-    @State private var argsText = ""
     @State private var enabled = true
     @State private var showingDeleteConfirmation = false
-
-    /// Transports offered here (stdio: unsandboxed macOS only).
-    private var availableTransports: [MCPTransportKind] {
-        MCPTransportKind.stdioAvailable ? MCPTransportKind.allCases : [.sse, .http]
-    }
 
     var body: some View {
         EditorSheet(
@@ -58,43 +51,30 @@ struct MCPServerEditorView: View {
             Section("Server") {
                 TextField("Name", text: $name)
                 Picker("Transport", selection: $transport) {
-                    ForEach(availableTransports) { kind in
+                    ForEach(MCPTransportKind.allCases) { kind in
                         Text(kind.label).tag(kind)
                     }
                 }
                 Toggle("Enabled", isOn: $enabled)
             }
 
-            if transport.isRemote {
-                Section {
-                    TextField("https://server.example.com/mcp", text: $url)
-                        .autocorrectionDisabled()
-                        #if os(iOS)
-                        .textInputAutocapitalization(.never)
-                        .keyboardType(.URL)
-                        #endif
-                } header: {
-                    Text("Connection")
-                } footer: {
-                    Text("Streamable HTTP is the modern MCP transport. Choose SSE (legacy) for servers exposing a /sse endpoint, e.g. supergateway or mcp-proxy bridges.")
-                }
+            Section {
+                TextField("https://server.example.com/mcp", text: $url)
+                    .autocorrectionDisabled()
+                    #if os(iOS)
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.URL)
+                    #endif
+            } header: {
+                Text("Connection")
+            } footer: {
+                Text("Streamable HTTP is the modern MCP transport. Choose SSE (legacy) for servers exposing a /sse endpoint, e.g. supergateway or mcp-proxy bridges.")
+            }
 
-                Section("Auth Header (optional)") {
-                    TextField("Header (e.g. Authorization)", text: $headerKey)
-                        .autocorrectionDisabled()
-                    SecureField("Value (e.g. Bearer …)", text: $headerValue)
-                }
-            } else {
-                Section {
-                    TextField("/usr/local/bin/mcp-server", text: $command)
-                        .autocorrectionDisabled()
-                    TextField("Arguments (space-separated)", text: $argsText)
-                        .autocorrectionDisabled()
-                } header: {
-                    Text("Command")
-                } footer: {
-                    Text("Launched as a local subprocess. The app must be able to spawn processes (macOS, sandbox off).")
-                }
+            Section("Auth Header (optional)") {
+                TextField("Header (e.g. Authorization)", text: $headerKey)
+                    .autocorrectionDisabled()
+                SecureField("Value (e.g. Bearer …)", text: $headerValue)
             }
 
             if server != nil {
@@ -112,10 +92,8 @@ struct MCPServerEditorView: View {
     }
 
     private var isValid: Bool {
-        guard !name.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
-        return transport.isRemote
-            ? !url.trimmingCharacters(in: .whitespaces).isEmpty
-            : !command.trimmingCharacters(in: .whitespaces).isEmpty
+        !name.trimmingCharacters(in: .whitespaces).isEmpty
+            && !url.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     private func load() {
@@ -125,8 +103,6 @@ struct MCPServerEditorView: View {
         url = server.url
         headerKey = server.headerKey
         headerValue = server.headerValue
-        command = server.command
-        argsText = server.args.joined(separator: " ")
         enabled = server.enabled
     }
 
@@ -137,16 +113,15 @@ struct MCPServerEditorView: View {
         target.url = url.trimmingCharacters(in: .whitespaces)
         target.headerKey = headerKey.trimmingCharacters(in: .whitespaces)
         target.headerValue = headerValue
-        target.command = command.trimmingCharacters(in: .whitespaces)
-        target.args = argsText.split(separator: " ").map(String.init)
         target.enabled = enabled
         if server == nil { context.insert(target) }
         context.saveOrLog()
 
-        // Reconnect to reflect the change.
+        // Reconnect to reflect the change. `remove` (not `disconnect`) also
+        // drops the cached tools — stale, after URL/transport may have changed.
         let id = target.id
         Task {
-            await env.mcp.disconnect(serverID: id)
+            await env.mcp.remove(serverID: id)
             if target.enabled { await env.mcp.connect(target) }
         }
         dismiss()
@@ -155,7 +130,7 @@ struct MCPServerEditorView: View {
     private func delete() {
         guard let server else { return }
         let id = server.id
-        Task { await env.mcp.disconnect(serverID: id) }
+        Task { await env.mcp.remove(serverID: id) }
         context.delete(server)
         context.saveOrLog()
         dismiss()

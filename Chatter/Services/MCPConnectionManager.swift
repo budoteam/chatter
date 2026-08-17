@@ -2,12 +2,11 @@ import Foundation
 import MCP
 #if os(macOS)
 import AppKit
-import System
 #endif
 
 /// Owns live MCP `Client` sessions, keeps a namespaced tool registry, and
-/// dispatches tool calls. Remote servers use Streamable HTTP (+ optional SSE);
-/// macOS additionally supports stdio servers launched as subprocesses.
+/// dispatches tool calls. Servers are remote only: Streamable HTTP or
+/// legacy SSE (`LegacySSEClientTransport`).
 @MainActor
 @Observable
 final class MCPConnectionManager: MCPClientProtocol {
@@ -16,7 +15,7 @@ final class MCPConnectionManager: MCPClientProtocol {
 
     private var clients: [UUID: Client] = [:]
     /// Last configs seen by `syncConnections`, so a silently dead session
-    /// (sleep, network change, crashed stdio subprocess) can be rebuilt
+    /// (sleep, network change, dropped connection) can be rebuilt
     /// without waiting for the next app launch.
     private var configs: [UUID: MCPServerConfig] = [:]
     /// namespacedName -> (owning server, original tool name)
@@ -36,7 +35,6 @@ final class MCPConnectionManager: MCPClientProtocol {
     /// wrong server, so the second one is refused.
     private var slugs: [UUID: String] = [:]
     #if os(macOS)
-    private var processes: [UUID: Process] = [:]
     /// The manager is owned by AppEnvironment and lives as long as the app,
     /// so this observer deliberately has no matching removeObserver.
     private var wakeObserver: NSObjectProtocol?
@@ -52,9 +50,12 @@ final class MCPConnectionManager: MCPClientProtocol {
         startObservingWakeIfNeeded()
         #endif
 
-        // Drop connections that are gone or disabled.
-        for id in clients.keys where !wanted.contains(id) {
-            await disconnect(serverID: id)
+        // Drop connections and cached tools for servers that are gone or
+        // disabled. `knownIDs` covers both live clients and servers whose
+        // session died but still hold cached tools (see disconnect).
+        let knownIDs = Set(clients.keys).union(toolsByServer.keys)
+        for id in knownIDs where !wanted.contains(id) {
+            await remove(serverID: id)
         }
         // Connect anything not already connected — concurrently, so one slow
         // or unreachable server doesn't stall the rest.
@@ -104,13 +105,8 @@ final class MCPConnectionManager: MCPClientProtocol {
             states[config.id] = .connected(toolCount: resolved.count)
             AppLogger.mcp.info("Connected MCP '\(config.name, privacy: .public)' — \(resolved.count) tools")
         } catch {
-            // Roll back whatever got as far as starting: a stdio subprocess
-            // launched in makeTransport, or a transport that connected before
-            // listTools threw — both would otherwise leak.
-            #if os(macOS)
-            processes[config.id]?.terminate()
-            processes[config.id] = nil
-            #endif
+            // Roll back a transport that connected before listTools threw —
+            // it would otherwise leak.
             try? await Self.withHardTimeout(seconds: 5, label: "connect-cleanup") {
                 await client.disconnect()
             }
@@ -140,16 +136,21 @@ final class MCPConnectionManager: MCPClientProtocol {
         }
         clients[serverID] = nil
         slugs[serverID] = nil
-        // Purge this server's tools from the registry.
+        states[serverID] = .disconnected
+        // Deliberately keep `toolsByServer`/`registry`: a silently dead
+        // session (sleep, network change, crashed subprocess) must stay
+        // callable so `callTool` can rebuild it on demand. Only `remove`
+        // drops the cached tools.
+    }
+
+    /// Fully removes a server: disconnects it and drops its cached tools so
+    /// they are no longer offered. Used when a server is disabled or deleted.
+    func remove(serverID: UUID) async {
+        await disconnect(serverID: serverID)
         for t in toolsByServer[serverID] ?? [] {
             registry[t.namespacedName] = nil
         }
         toolsByServer[serverID] = nil
-        #if os(macOS)
-        processes[serverID]?.terminate()
-        processes[serverID] = nil
-        #endif
-        states[serverID] = .disconnected
     }
 
     // MARK: - Tools
@@ -164,7 +165,20 @@ final class MCPConnectionManager: MCPClientProtocol {
     private static let toolCallTimeout: TimeInterval = 60
 
     func callTool(namespacedName: String, argumentsJSON: String) async throws -> String {
-        guard let entry = registry[namespacedName], let client = clients[entry.serverID] else {
+        guard let entry = registry[namespacedName] else {
+            throw MCPError.toolUnavailable(namespacedName)
+        }
+        // A once-connected server whose session died silently (sleep, network
+        // change, crashed subprocess) has no live client but still holds its
+        // cached tools. Rebuild on demand instead of failing every turn until
+        // the user opens Settings.
+        if clients[entry.serverID] == nil {
+            guard let config = configs[entry.serverID], config.enabled else {
+                throw MCPError.toolUnavailable(namespacedName)
+            }
+            await reconnect(serverID: entry.serverID, config: config)
+        }
+        guard let client = clients[entry.serverID] else {
             throw MCPError.toolUnavailable(namespacedName)
         }
         do {
@@ -175,36 +189,38 @@ final class MCPConnectionManager: MCPClientProtocol {
         } catch let error as CancellationError {
             throw error
         } catch {
-            // A once-connected server whose call fails mid-session almost
-            // always means the transport died silently (macOS sleep, network
-            // change, crashed stdio subprocess) while the state still claims
-            // "connected". Rebuild the session and retry the call once, so a
-            // stale connection heals itself instead of hanging every turn
-            // until the app is restarted. The state then tells the truth
-            // again: .connected after a successful reconnect, else .failed.
+            // A call that fails mid-session almost always means the transport
+            // died silently while the state still claims "connected". Rebuild
+            // the session and retry the call once, so a stale connection heals
+            // itself instead of hanging every turn until the app is restarted.
             guard let config = configs[entry.serverID], config.enabled else { throw error }
-            if let reconnect = reconnects[entry.serverID] {
-                // Another failed call is already rebuilding this session.
-                await reconnect.value
-            } else {
-                guard case .connected = states[entry.serverID] else { throw error }
-                AppLogger.mcp.info("MCP call '\(namespacedName, privacy: .public)' failed — reconnecting '\(config.name, privacy: .public)' and retrying once")
-                let reconnect = Task {
-                    await self.disconnect(serverID: entry.serverID)
-                    await self.connect(config)
-                }
-                reconnects[entry.serverID] = reconnect
-                await reconnect.value
-                reconnects[entry.serverID] = nil
-            }
-            guard let retry = registry[namespacedName], let retryClient = clients[retry.serverID] else {
+            await reconnect(serverID: entry.serverID, config: config)
+            guard let retryClient = clients[entry.serverID] else {
                 throw MCPError.toolUnavailable(namespacedName)
             }
             return try await performCall(
-                client: retryClient, originalName: retry.original,
+                client: retryClient, originalName: entry.original,
                 label: namespacedName, argumentsJSON: argumentsJSON
             )
         }
+    }
+
+    /// Rebuilds a dead session, deduplicating concurrent reconnects for the
+    /// same server so parallel failures await one shared reconnect instead of
+    /// racing a second connect.
+    private func reconnect(serverID: UUID, config: MCPServerConfig) async {
+        if let reconnect = reconnects[serverID] {
+            await reconnect.value
+            return
+        }
+        AppLogger.mcp.info("MCP reconnecting '\(config.name, privacy: .public)'")
+        let reconnect = Task {
+            await self.disconnect(serverID: serverID)
+            await self.connect(config)
+        }
+        reconnects[serverID] = reconnect
+        await reconnect.value
+        reconnects[serverID] = nil
     }
 
     /// Single tool invocation against a live client, bounded by the hard
@@ -287,16 +303,6 @@ final class MCPConnectionManager: MCPClientProtocol {
                 streaming: false,
                 requestModifier: modifier
             )
-
-        case .stdio:
-            #if os(macOS)
-            // Configs may sync in from an unsandboxed Mac; sandboxed builds
-            // (TestFlight/App Store) can't spawn subprocesses.
-            guard MCPTransportKind.stdioAvailable else { throw MCPError.stdioUnsupported }
-            return try makeStdioTransport(for: config)
-            #else
-            throw MCPError.stdioUnsupported
-            #endif
         }
     }
 
@@ -317,45 +323,6 @@ final class MCPConnectionManager: MCPClientProtocol {
                 await self.refreshConnections(configs: Array(self.configs.values))
             }
         }
-    }
-
-    private func makeStdioTransport(for config: MCPServerConfig) throws -> any Transport {
-        let command = config.command.trimmingCharacters(in: .whitespaces)
-        guard !command.isEmpty else { throw MCPError.badCommand }
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: command)
-        process.arguments = config.args
-
-        let toChild = Pipe()   // we write -> child's stdin
-        let fromChild = Pipe() // child's stdout -> we read
-        process.standardInput = toChild
-        process.standardOutput = fromChild
-
-        try process.run()
-        processes[config.id] = process
-
-        // Unexpected exit (crash) leaves the connection green while every
-        // call hangs — reconnect right away so the state tells the truth.
-        // Guarded against our own terminate() in disconnect/rollback: both
-        // clear processes[id] before this handler gets to run.
-        let serverID = config.id
-        let serverName = config.name
-        process.terminationHandler = { [weak self] proc in
-            Task { @MainActor [weak self] in
-                guard let self, self.processes[serverID] === proc,
-                      case .connected = self.states[serverID] else { return }
-                AppLogger.mcp.error("MCP stdio server '\(serverName, privacy: .public)' exited unexpectedly — reconnecting")
-                await self.disconnect(serverID: serverID)
-                if let config = self.configs[serverID], config.enabled {
-                    await self.connect(config)
-                }
-            }
-        }
-
-        let input = FileDescriptor(rawValue: fromChild.fileHandleForReading.fileDescriptor)
-        let output = FileDescriptor(rawValue: toChild.fileHandleForWriting.fileDescriptor)
-        return StdioTransport(input: input, output: output)
     }
     #endif
 
@@ -425,16 +392,12 @@ final class MCPConnectionManager: MCPClientProtocol {
 
     enum MCPError: LocalizedError {
         case badURL(String)
-        case badCommand
-        case stdioUnsupported
         case toolUnavailable(String)
         case toolTimeout(String)
 
         var errorDescription: String? {
             switch self {
             case .badURL(let s): return "Invalid server URL: \(s)"
-            case .badCommand: return "Missing stdio command."
-            case .stdioUnsupported: return "stdio MCP servers need an unsandboxed macOS build (not available in TestFlight/App Store builds)."
             case .toolUnavailable(let name): return "Tool '\(name)' is not available."
             case .toolTimeout(let name): return "Tool '\(name)' timed out — the server may be unreachable."
             }

@@ -87,7 +87,9 @@ struct RootView: View {
         #if os(iOS)
         // iOS suspension silently kills MCP sockets while the clients still
         // report connected — every tool call would then hang. Rebuild the
-        // sessions whenever the app returns to the foreground.
+        // sessions whenever the app returns to the foreground. (macOS needs
+        // no equivalent: the wake observer covers sleep, and `callTool`
+        // rebuilds silently dead sessions on demand.)
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
             Task { await env.mcp.refreshConnections(configs: allServers()) }

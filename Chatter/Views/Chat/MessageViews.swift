@@ -176,19 +176,19 @@ struct ThinkingTraceView: View {
             .font(Theme.Typography.font(.caption).weight(.medium))
             .foregroundStyle(.secondary)
 
-            ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(spacing: 0) {
-                        MarkdownText(text: text)
-                            .font(Theme.Typography.font(.callout))
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        Color.clear.frame(height: 1).id("tail")
-                    }
+            ScrollView {
+                VStack(spacing: 0) {
+                    MarkdownText(text: text)
+                        .font(Theme.Typography.font(.callout))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .onAppear { if isThinking { pinToTail(proxy) } }
-                .onChange(of: text.count) { if isThinking { pinToTail(proxy) } }
             }
+            // Anchored to the bottom so the growing trace follows the tail
+            // without a manual scrollTo per flush — the onChange-driven pin
+            // fired one frame after the content grew and made the box visibly
+            // jump at ~12 Hz.
+            .defaultScrollAnchor(.bottom)
             .frame(height: height)
         }
         .padding(.leading, 12)
@@ -214,14 +214,6 @@ struct ThinkingTraceView: View {
                 }
             }
         }
-    }
-
-    private func pinToTail(_ proxy: ScrollViewProxy) {
-        // disablesAnimations — same reason as ChatView.scrollToBottom: the
-        // scroll must not inherit a transaction already in flight.
-        var transaction = Transaction()
-        transaction.disablesAnimations = true
-        withTransaction(transaction) { proxy.scrollTo("tail", anchor: .bottom) }
     }
 }
 
@@ -334,36 +326,22 @@ private struct ActivityStepsScroll: View {
     var trailingThinking: String? = nil
     let followTail: Bool
 
-    /// Growth of the trailing step (streaming content/thinking, persisted
-    /// tool calls) plus step count — drives the tail re-pin.
-    private var fingerprint: String {
-        let last = steps.last
-        return "\(steps.count)|\(last?.content.count ?? 0)|\(last?.thinking?.count ?? 0)|\(last?.toolCallsJSON?.count ?? 0)"
-    }
-
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    ForEach(steps) { StepView(message: $0) }
-                    if let trailingThinking {
-                        MarkdownText(text: trailingThinking)
-                            .font(Theme.Typography.font(.callout))
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    Color.clear.frame(height: 1).id("tail")
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(steps) { StepView(message: $0) }
+                if let trailingThinking {
+                    MarkdownText(text: trailingThinking)
+                        .font(Theme.Typography.font(.callout))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            .onAppear { if followTail { pinToTail(proxy) } }
-            .onChange(of: fingerprint) { if followTail { pinToTail(proxy) } }
         }
-    }
-
-    private func pinToTail(_ proxy: ScrollViewProxy) {
-        var transaction = Transaction()
-        transaction.disablesAnimations = true
-        withTransaction(transaction) { proxy.scrollTo("tail", anchor: .bottom) }
+        // Follow the tail while the turn runs without a manual scrollTo per
+        // flush (the onChange-driven pin fired one frame late and made the
+        // stream jump). When the turn is done the box rests at the top.
+        .defaultScrollAnchor(followTail ? .bottom : .top)
     }
 }
 

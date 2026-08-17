@@ -157,15 +157,19 @@ struct ChatView: View {
         }
     }
 
-    /// Streamed content + thinking of the newest message — drives auto-scroll.
-    /// Includes isStreaming so the scroll also fires when streaming ends and
-    /// the thoughts disclosure auto-collapses without a content change.
+    /// Streamed content of the newest message — drives auto-scroll. Includes
+    /// isStreaming so the scroll also fires when streaming ends and the
+    /// thoughts disclosure auto-collapses without a content change.
+    /// Deliberately excludes thinking growth: the thinking trace renders in a
+    /// fixed-height box that follows its own tail, so the outer transcript
+    /// must not re-pin on every thinking flush — the two scrolls would fight
+    /// and the trace visibly jumps.
     private var lastMessageFingerprint: String {
         // Evaluated per streamed flush (~12 Hz) — find the newest message
         // with a linear max instead of sorting the whole session.
         guard let last = (session.messages ?? []).max(by: { $0.orderIndex < $1.orderIndex })
         else { return "" }
-        return "\(last.isStreaming)|\(last.content.count)|\(last.thinking?.count ?? 0)"
+        return "\(last.isStreaming)|\(last.content.count)"
     }
 
     // MARK: - Transcript grouping

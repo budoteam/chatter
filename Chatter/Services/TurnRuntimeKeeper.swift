@@ -30,6 +30,13 @@ enum TurnRuntimeKeeper {
         var continued: AnyObject?
         var legacy: UIBackgroundTaskIdentifier?
         var onExpire: () -> Void
+        /// Title/subtitle for the Live Activity, kept so the continued task
+        /// can be submitted later (on backgrounding) instead of at turn start.
+        var title: String
+        var subtitle: String
+        /// True once the continued task was submitted — prevents re-submitting
+        /// on every background transition.
+        var submitted: Bool = false
     }
 
     private static var handles: [UUID: Handle] = [:]
@@ -45,15 +52,44 @@ enum TurnRuntimeKeeper {
     /// Arms background keeping for a turn. `onExpire` must cancel the turn;
     /// it fires when the user cancels via the Live Activity or the system
     /// revokes background time.
+    ///
+    /// The continued-processing task is NOT submitted here: submitting it at
+    /// turn start shows the Live Activity banner even while the app is in the
+    /// foreground (iPad). It is submitted lazily by
+    /// `submitContinuedTasksForActiveTurns` when the app actually backgrounds.
     static func begin(sessionID: UUID, subtitle: String, onExpire: @escaping @MainActor () -> Void) {
         #if os(iOS)
         guard handles[sessionID] == nil else { return }
         let title = "Generating reply"
-        handles[sessionID] = Handle(continued: nil, legacy: nil, onExpire: onExpire)
-        if #available(iOS 26.0, *), submitContinuedTask(sessionID: sessionID, title: title, subtitle: subtitle) {
+        handles[sessionID] = Handle(
+            continued: nil, legacy: nil, onExpire: onExpire,
+            title: title, subtitle: subtitle
+        )
+        if #available(iOS 26.0, *) {
+            // Deferred — see submitContinuedTasksForActiveTurns.
             return
         }
         beginLegacyTask(sessionID: sessionID, name: title)
+        #endif
+    }
+
+    /// Submits the continued-processing task for every active turn that has
+    /// not been submitted yet. Called when the app transitions to the
+    /// background, so the Live Activity only appears once the user has
+    /// actually left the app — never while it is in the foreground.
+    static func submitContinuedTasksForActiveTurns() {
+        #if os(iOS)
+        guard #available(iOS 26.0, *) else { return }
+        for (sessionID, handle) in handles where !handle.submitted {
+            if submitContinuedTask(sessionID: sessionID, title: handle.title, subtitle: handle.subtitle) {
+                handles[sessionID]?.submitted = true
+            } else {
+                // Without a fallback the turn would die on suspension: arm
+                // the legacy background task instead (same as pre-iOS 26).
+                beginLegacyTask(sessionID: sessionID, name: handle.title)
+                handles[sessionID]?.submitted = true
+            }
+        }
         #endif
     }
 

@@ -145,7 +145,7 @@ struct SettingsView: View {
         } header: {
             Text("MCP Servers")
         } footer: {
-            Text("Agents can call tools from the servers you enable for them. HTTP/SSE work on all platforms; stdio (local subprocess) is macOS only.")
+            Text("Agents can call tools from the servers you enable for them. HTTP/SSE servers work on all platforms.")
         }
     }
 
@@ -279,7 +279,7 @@ struct SettingsView: View {
     }
 
     private func deleteServer(_ server: MCPServerConfig) {
-        Task { await env.mcp.disconnect(serverID: server.id) }
+        Task { await env.mcp.remove(serverID: server.id) }
         context.delete(server)
         context.saveOrLog()
     }

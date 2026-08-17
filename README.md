@@ -8,7 +8,7 @@ Multiplatform (iOS / iPadOS 17+, macOS 14+) LLM chat app powered by **Ollama Clo
 - **Ollama Cloud** chat with live token streaming (`/api/chat`, NDJSON), including thinking traces.
 - **Agents**: each has its own model, system prompt, temperature, icon/color, and set of
   MCP servers and knowledge bundles.
-- **MCP tools**: Streamable HTTP + SSE on all platforms; stdio (local subprocess) on macOS.
+- **MCP tools**: Streamable HTTP + SSE on all platforms.
   Static auth header per server. The model's tool calls are run and fed back automatically
   (agentic loop) — up to 42 tool rounds, after which one final round without tools guarantees
   a text answer.
@@ -78,13 +78,6 @@ changing that value and the container ID.
 > Note: new record types (e.g. the knowledge-base models) materialize in the CloudKit
 > **Development** schema on first run. Deploy the schema to **Production** in the CloudKit
 > Console before shipping a TestFlight/App Store build.
-
-## macOS stdio MCP servers
-
-stdio servers are launched as subprocesses, so the macOS target ships with the App Sandbox
-**disabled** (`Chatter/Chatter-macOS.entitlements`). This is fine for local/dev use; a
-sandboxed App Store build would need to drop stdio (HTTP/SSE still work everywhere).
-Distributing the Mac app therefore means Developer ID + notarization, not the Mac App Store.
 
 ## Structure
 

@@ -2,10 +2,15 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- Sandbox off so stdio MCP servers can be launched as subprocesses.
-	     This rules out Mac App Store distribution; use Developer ID instead. -->
+	<!-- Sandboxed in every configuration: distribution is App Store only. -->
 	<key>com.apple.security.app-sandbox</key>
-	<false/>
+	<true/>
+	<!-- Outgoing connections: Ollama Cloud + HTTP/SSE MCP servers. -->
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<!-- OKF folder import/export and PDF import via the file panel. -->
+	<key>com.apple.security.files.user-selected.read-write</key>
+	<true/>
 	<key>com.apple.developer.icloud-services</key>
 	<array>
 		<string>CloudKit</string>
@@ -14,6 +19,7 @@
 	<array>
 		<string>iCloud.team.budo.chatter</string>
 	</array>
+	<!-- Xcode rewrites this to "production" when exporting for the App Store. -->
 	<key>com.apple.developer.aps-environment</key>
 	<string>development</string>
 </dict>
