@@ -15,3 +15,6 @@ ChatterWatch/Info.plist
 # SPM
 .swiftpm/
 .build/
+
+# pi
+.pi/
