@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import Photos
 import PhotosUI
 import UniformTypeIdentifiers
 #if os(macOS)
@@ -33,8 +34,14 @@ struct ComposerView: View {
             if !viewModel.pendingImages.isEmpty {
                 thumbnailStrip
             }
-            if viewModel.imageLimitHit, !viewModel.pendingImages.isEmpty {
+            if viewModel.imageLimitHit {
                 Text("Some images were skipped — attachments are limited to 700 KB per message so the chat keeps syncing via iCloud.")
+                    .font(Theme.Typography.font(.caption))
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 4)
+            }
+            if viewModel.imageImportFailed {
+                Text("Some images couldn't be loaded — they may still be syncing from iCloud. Please try again.")
                     .font(Theme.Typography.font(.caption))
                     .foregroundStyle(.orange)
                     .padding(.horizontal, 4)
@@ -231,27 +238,109 @@ struct ComposerView: View {
 
     private func loadPickedImages(_ items: [PhotosPickerItem]) async {
         var base64s: [String] = []
+        var failed = 0
         for item in items {
-            if let data = try? await item.loadTransferable(type: Data.self),
-               let base64 = ImageAttachmentProcessor.makeBase64JPEG(from: data) {
+            if let base64 = await Self.loadImageBase64(from: item) {
                 base64s.append(base64)
+            } else {
+                failed += 1
             }
         }
+        // Silent skips are the worst outcome here — log and surface them.
+        if failed > 0 {
+            AppLogger.ui.error("Photo import: \(failed, privacy: .public) of \(items.count, privacy: .public) image(s) could not be loaded")
+        }
         viewModel.addBase64Images(base64s)
+        viewModel.imageImportFailed = failed > 0
         photoItems = []
+    }
+
+    /// Original data first (best quality). On failure fall back to a
+    /// Photos.framework rendition: it delivers a downsampled image instead of
+    /// the full original (48 MP ProRAW originals are the classic raw-data
+    /// failure) and handles iCloud downloads itself. The picker grants read
+    /// access to its own selections — no library authorization needed.
+    private static func loadImageBase64(from item: PhotosPickerItem) async -> String? {
+        if let data = try? await item.loadTransferable(type: Data.self),
+           let base64 = ImageAttachmentProcessor.makeBase64JPEG(from: data) {
+            return base64
+        }
+        return await loadRenditionBase64(from: item)
+    }
+
+    #if os(macOS)
+    private static func loadRenditionBase64(from item: PhotosPickerItem) async -> String? {
+        guard let image = await requestRendition(from: item),
+              let tiff = image.tiffRepresentation else { return nil }
+        return ImageAttachmentProcessor.makeBase64JPEG(from: tiff)
+    }
+
+    private static func requestRendition(from item: PhotosPickerItem) async -> NSImage? {
+        guard let asset = pickerAsset(for: item) else { return nil }
+        return await withCheckedContinuation { continuation in
+            // .highQualityFormat guarantees exactly one callback.
+            PHImageManager.default().requestImage(
+                for: asset,
+                targetSize: CGSize(width: 1568, height: 1568),
+                contentMode: .aspectFit,
+                options: renditionOptions()
+            ) { image, _ in continuation.resume(returning: image) }
+        }
+    }
+    #else
+    private static func loadRenditionBase64(from item: PhotosPickerItem) async -> String? {
+        guard let image = await requestRendition(from: item),
+              let data = image.jpegData(compressionQuality: 0.9) else { return nil }
+        return ImageAttachmentProcessor.makeBase64JPEG(from: data)
+    }
+
+    private static func requestRendition(from item: PhotosPickerItem) async -> UIImage? {
+        guard let asset = pickerAsset(for: item) else { return nil }
+        return await withCheckedContinuation { continuation in
+            // .highQualityFormat guarantees exactly one callback.
+            PHImageManager.default().requestImage(
+                for: asset,
+                targetSize: CGSize(width: 1568, height: 1568),
+                contentMode: .aspectFit,
+                options: renditionOptions()
+            ) { image, _ in continuation.resume(returning: image) }
+        }
+    }
+    #endif
+
+    private static func pickerAsset(for item: PhotosPickerItem) -> PHAsset? {
+        guard let assetID = item.itemIdentifier else { return nil }
+        return PHAsset.fetchAssets(withLocalIdentifiers: [assetID], options: nil).firstObject
+    }
+
+    private static func renditionOptions() -> PHImageRequestOptions {
+        let options = PHImageRequestOptions()
+        options.isNetworkAccessAllowed = true
+        options.deliveryMode = .highQualityFormat
+        // Without this the rendition arrives at ORIGINAL size (targetSize is
+        // only a decode hint) — the full ProRAW decode is what we're avoiding.
+        options.resizeMode = .exact
+        return options
     }
 
     private func loadFileURLs(_ urls: [URL]) async {
         var base64s: [String] = []
+        var failed = 0
         for url in urls {
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
             if let data = try? Data(contentsOf: url),
                let base64 = ImageAttachmentProcessor.makeBase64JPEG(from: data) {
                 base64s.append(base64)
+            } else {
+                failed += 1
             }
         }
+        if failed > 0 {
+            AppLogger.ui.error("Image file import: \(failed, privacy: .public) of \(urls.count, privacy: .public) file(s) could not be loaded")
+        }
         viewModel.addBase64Images(base64s)
+        viewModel.imageImportFailed = failed > 0
     }
 
     // MARK: - Agent selector (the agent defines the model)

@@ -13,6 +13,9 @@ final class ChatViewModel {
     /// Set when an offered image was refused because it would push the message's
     /// attachments past the iCloud-sync size budget; read by the composer banner.
     var imageLimitHit = false
+    /// Set when picked/imported images could not be loaded at all (iCloud
+    /// fetch failure, undecodable asset); read by the composer banner.
+    var imageImportFailed = false
 
     /// Whether the composer holds sendable content. Whether a send may start
     /// also depends on the session's turn state, which `AppEnvironment` owns
@@ -28,6 +31,8 @@ final class ChatViewModel {
         guard (!text.isEmpty || !images.isEmpty), !env.isSending(session) else { return }
         inputText = ""
         pendingImages = []
+        imageLimitHit = false
+        imageImportFailed = false
 
         env.runTurn(for: session, context: context) { [weak self] in
             do {
