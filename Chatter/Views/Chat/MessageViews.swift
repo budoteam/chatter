@@ -129,6 +129,11 @@ struct AssistantMessage: View {
                         isThinking: message.isStreaming && message.content.isEmpty
                     )
                 }
+                // Generated images (imagegen tool) — they are the payload of
+                // otherwise empty assistant messages.
+                if !message.imageAttachments.isEmpty {
+                    AssistantAttachments(attachments: message.imageAttachments)
+                }
                 if message.content.isEmpty && message.isStreaming && thinking.isEmpty {
                     TypingIndicator().padding(.top, 6)
                 } else if !message.content.isEmpty {

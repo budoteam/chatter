@@ -80,8 +80,10 @@ struct WatchRootView: View {
         }
         .task {
             env.refreshAPIKeyState()
+            env.refreshOpenRouterKeyState()
             WatchKeySync.shared.requestKeyIfNeeded()
             await env.refreshModels()
+            await env.refreshImageModels()
             await env.mcp.syncConnections(configs: mcpServers.filter(\.enabled))
         }
     }

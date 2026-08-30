@@ -49,11 +49,14 @@ enum ImageAttachmentProcessor {
         return (output as Data).base64EncodedString()
     }
 
+#if !os(watchOS)
     /// Loads image payloads from paste/drop providers as downscaled Base64
     /// JPEGs, skipping anything undecodable. In-memory image content
     /// (screenshots, copied images) and dragged/copied image files both
     /// conform to `UTType.image` and arrive as encoded data; providers that
     /// only carry a file URL are read security-scoped below.
+    /// (NSItemProvider does not exist on watchOS — the watch only uses the
+    /// single-image recompression above, for generated images.)
     static func makeBase64JPEGs(from providers: [NSItemProvider]) async -> [String] {
         var result: [String] = []
         for provider in providers {
@@ -99,6 +102,7 @@ enum ImageAttachmentProcessor {
             }
         }
     }
+#endif
 
 #if os(macOS)
     /// Attachable image payloads on `pasteboard`, if any: in-memory images

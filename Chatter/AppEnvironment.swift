@@ -21,6 +21,9 @@ final class AppEnvironment {
     let knowledge: KnowledgeToolProvider
     let artifacts: ArtifactToolProvider
     let engine: ChatEngine
+    /// Image generation over OpenRouter (model list for Settings; the
+    /// imagegen tool holds its own instance).
+    let openRouterImages = OpenRouterImageService()
     /// Watches CloudKit sync events for the Settings status section.
     let sync = CloudSyncMonitor()
 
@@ -31,6 +34,16 @@ final class AppEnvironment {
     var isLoadingModels = false
     var modelLoadError: String?
     var hasAPIKey: Bool = KeychainService.hasAPIKey
+    /// Whether an OpenRouter key is stored (image generation only).
+    var hasOpenRouterKey: Bool = KeychainService.hasOpenRouterAPIKey
+    /// Mirror of `AppSettings.imageGenModel` for SwiftUI reactivity; writes persist.
+    var imageGenModel: String = AppSettings.imageGenModel {
+        didSet { AppSettings.imageGenModel = imageGenModel }
+    }
+    /// Cached OpenRouter image-capable models for the Settings picker.
+    var imageModels: [OpenRouterImageModel] = []
+    var isLoadingImageModels = false
+    var imageModelLoadError: String?
     /// Cached `/api/show` capabilities per model name (lowercased set).
     var modelCapabilities: [String: Set<String>] = [:]
     /// Mirror of `AppSettings.visionModel` for SwiftUI reactivity; writes persist.
@@ -87,7 +100,11 @@ final class AppEnvironment {
         #if os(watchOS)
         WatchKeySync.shared.onKeyReceived = { [weak self] in
             self?.refreshAPIKeyState()
-            Task { await self?.refreshModels() }
+            self?.refreshOpenRouterKeyState()
+            Task {
+                await self?.refreshModels()
+                await self?.refreshImageModels()
+            }
         }
         #endif
         #endif
@@ -192,6 +209,26 @@ final class AppEnvironment {
     }
 
     func refreshAPIKeyState() { hasAPIKey = KeychainService.hasAPIKey }
+
+    func refreshOpenRouterKeyState() { hasOpenRouterKey = KeychainService.hasOpenRouterAPIKey }
+
+    /// Loads the image-capable model list from OpenRouter (best-effort).
+    func refreshImageModels() async {
+        guard hasOpenRouterKey else {
+            imageModels = []
+            imageModelLoadError = nil
+            return
+        }
+        isLoadingImageModels = true
+        imageModelLoadError = nil
+        defer { isLoadingImageModels = false }
+        do {
+            imageModels = try await openRouterImages.listImageModels()
+        } catch {
+            imageModelLoadError = error.localizedDescription
+            AppLogger.api.error("listImageModels failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
 
     // MARK: - Handoff (iOS requesting side)
 

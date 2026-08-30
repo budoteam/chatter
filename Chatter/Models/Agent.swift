@@ -30,6 +30,8 @@ final class Agent {
     var skillAuthoringEnabled: Bool = false
     /// Whether the built-in web research tools (search & fetch) are offered.
     var webAccessEnabled: Bool = true
+    /// Whether the built-in image generation tool (OpenRouter) is offered.
+    var imageGenEnabled: Bool = false
     /// Raw `ThinkingMode` — how the model's reasoning mode is requested.
     var thinkingModeRaw: String = ""
     var createdAt: Date = Date()
@@ -52,6 +54,7 @@ final class Agent {
         memoryEnabled: Bool = false,
         skillAuthoringEnabled: Bool = false,
         webAccessEnabled: Bool = true,
+        imageGenEnabled: Bool = false,
         isDefault: Bool = false
     ) {
         self.id = UUID()
@@ -68,6 +71,7 @@ final class Agent {
         self.memoryEnabled = memoryEnabled
         self.skillAuthoringEnabled = skillAuthoringEnabled
         self.webAccessEnabled = webAccessEnabled
+        self.imageGenEnabled = imageGenEnabled
         self.createdAt = Date()
         self.isDefault = isDefault
     }

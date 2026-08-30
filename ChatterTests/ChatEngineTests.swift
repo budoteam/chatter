@@ -57,6 +57,7 @@ final class ChatEngineTests: XCTestCase {
         var capabilities: [String: [String]] = [:]
         private(set) var callCount = 0
         private(set) var toolsPerCall: [Int] = []
+        private(set) var toolNamesPerCall: [[String]] = []
         private(set) var modelsPerCall: [String] = []
         private(set) var messagesPerCall: [[OllamaChatMessage]] = []
 
@@ -76,6 +77,7 @@ final class ChatEngineTests: XCTestCase {
             let index = callCount
             callCount += 1
             toolsPerCall.append(tools.count)
+            toolNamesPerCall.append(tools.map(\.function.name))
             modelsPerCall.append(model)
             messagesPerCall.append(messages)
             guard let makeStream else {
@@ -551,5 +553,104 @@ final class ChatEngineTests: XCTestCase {
         XCTAssertEqual(answer.role, .assistant)
         XCTAssertEqual(answer.content, "new answer")
         XCTAssertEqual(answer.orderIndex, 3, "slot 2 stays free for the syncing prompt copy")
+    }
+
+    // MARK: - Image generation (OpenRouter tool)
+
+    /// Gating: the imagegen tool is offered only when the agent opted in AND
+    /// the gate (key + model configured) is open.
+    func testImageGenToolOfferingGate() async throws {
+        // Opted out (default) with an open gate → not offered.
+        let context = try makeContext()
+        let (agent, session) = makeSession(in: context)
+        let ollama = MockOllamaService()
+        ollama.makeStream = { _, _ in self.stream(of: [.delta("ok"), .done(reason: "stop")]) }
+        let engine = ChatEngine(ollama: ollama, mcp: MockMCPClient(), knowledge: FakeKnowledge(), artifacts: ArtifactToolProvider())
+        engine.isImageGenConfigured = { true }
+
+        try await engine.send(text: "hi", session: session, agent: agent, context: context)
+
+        let offered = try XCTUnwrap(ollama.toolNamesPerCall.first)
+        XCTAssertFalse(offered.contains(ImageGenToolProvider.generateToolName))
+
+        // Opted in, but the gate is closed → still not offered.
+        agent.imageGenEnabled = true
+        let session2 = ChatSession()
+        session2.agent = agent
+        context.insert(session2)
+        let ollama2 = MockOllamaService()
+        ollama2.makeStream = { _, _ in self.stream(of: [.delta("ok"), .done(reason: "stop")]) }
+        let engine2 = ChatEngine(ollama: ollama2, mcp: MockMCPClient(), knowledge: FakeKnowledge(), artifacts: ArtifactToolProvider())
+        engine2.isImageGenConfigured = { false }
+
+        try await engine2.send(text: "hi", session: session2, agent: agent, context: context)
+
+        let offered2 = try XCTUnwrap(ollama2.toolNamesPerCall.first)
+        XCTAssertFalse(offered2.contains(ImageGenToolProvider.generateToolName))
+    }
+
+    /// Dispatch: an imagegen tool call is routed to the provider — the image
+    /// lands on a dedicated assistant message before the confirmation tool
+    /// result, and the loop streams the final answer afterwards.
+    func testImageGenToolOfferedAndDispatched() async throws {
+        MockURLProtocol.reset()
+        AppSettings.imageGenModel = "test/image-model"
+        defer {
+            MockURLProtocol.reset()
+            AppSettings.imageGenModel = ""
+        }
+        MockURLProtocol.handler = { _ in
+            (200, Data(#"{"choices":[{"message":{"role":"assistant","images":[{"type":"image_url","image_url":{"url":"data:image/png;base64,\#(TestImages.tinyPNGBase64)"}}]}}]}"#.utf8))
+        }
+
+        let context = try makeContext()
+        let agent = Agent(name: "Test", modelId: "test-model", webAccessEnabled: false, imageGenEnabled: true)
+        context.insert(agent)
+        let session = ChatSession()
+        session.agent = agent
+        context.insert(session)
+
+        let ollama = MockOllamaService()
+        let call = OllamaToolCall(function: .init(
+            name: ImageGenToolProvider.generateToolName,
+            arguments: .object(["prompt": .string("a cat")])
+        ))
+        ollama.makeStream = { index, _ in
+            index == 0
+                ? self.stream(of: [.toolCalls([call]), .done(reason: nil)])
+                : self.stream(of: [.delta("Bild erstellt."), .done(reason: "stop")])
+        }
+        var service = OpenRouterImageService(session: MockURLProtocol.makeSession())
+        service.apiKeyOverride = "test-key"
+        let engine = ChatEngine(
+            ollama: ollama, mcp: MockMCPClient(), knowledge: FakeKnowledge(),
+            artifacts: ArtifactToolProvider(),
+            imageGen: ImageGenToolProvider(service: service)
+        )
+        engine.isImageGenConfigured = { true }
+
+        try await engine.send(text: "mal mir eine Katze", session: session, agent: agent, context: context)
+
+        // The tool was offered in the first round.
+        let offered = try XCTUnwrap(ollama.toolNamesPerCall.first)
+        XCTAssertTrue(offered.contains(ImageGenToolProvider.generateToolName))
+        XCTAssertEqual(ollama.callCount, 2, "tool result must trigger a second stream round")
+
+        let messages = session.orderedMessages
+        // The image-carrying assistant message sits between the tool-calling
+        // round and the confirmation tool result.
+        let imageIndex = try XCTUnwrap(messages.firstIndex { !$0.imageAttachments.isEmpty })
+        let imageMessage = messages[imageIndex]
+        XCTAssertEqual(imageMessage.role, .assistant)
+        XCTAssertEqual(imageMessage.imageAttachments.count, 1)
+
+        let toolIndex = try XCTUnwrap(messages.firstIndex {
+            $0.role == .tool && $0.toolName == ImageGenToolProvider.generateToolName
+        })
+        XCTAssertLessThan(imageIndex, toolIndex)
+        XCTAssertTrue(messages[toolIndex].content.contains("Generated 1 image"))
+
+        XCTAssertEqual(messages.last?.role, .assistant)
+        XCTAssertEqual(messages.last?.content, "Bild erstellt.")
     }
 }

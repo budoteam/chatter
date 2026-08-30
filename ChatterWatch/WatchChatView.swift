@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UIKit
 
 /// One conversation: message history (streaming-aware) plus a composer.
 /// watchOS `TextField` offers dictation/scribble out of the box — no custom
@@ -28,7 +29,7 @@ struct WatchChatView: View {
             case .user:
                 return !message.content.isEmpty || !message.imageAttachments.isEmpty
             case .assistant:
-                return !message.content.isEmpty || message.isStreaming
+                return !message.content.isEmpty || message.isStreaming || !message.imageAttachments.isEmpty
             case .system, .tool:
                 return false
             }
@@ -137,6 +138,16 @@ struct WatchChatView: View {
                     Text(markdown(message.content))
                         .font(.callout)
                 }
+                // Generated images (imagegen tool) as small thumbnails.
+                ForEach(message.imageAttachments) { attachment in
+                    if let image = Self.image(from: attachment.base64) {
+                        image
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxWidth: 140, maxHeight: 140)
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
+                }
                 if message.isStreaming {
                     ProgressView()
                         .controlSize(.small)
@@ -144,6 +155,12 @@ struct WatchChatView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    private static func image(from base64: String) -> Image? {
+        guard let data = Data(base64Encoded: base64),
+              let uiImage = UIImage(data: data) else { return nil }
+        return Image(uiImage: uiImage)
     }
 
     private func markdown(_ content: String) -> AttributedString {

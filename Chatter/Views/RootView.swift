@@ -64,6 +64,7 @@ struct RootView: View {
             await ReminderScheduler.reconcile(context: context)
             env.runDueReminderActions(context: context)
             await env.refreshModels()
+            await env.refreshImageModels()
             backfillAgentModels()
             await env.mcp.syncConnections(configs: allServers())
             #if DEBUG
@@ -84,6 +85,7 @@ struct RootView: View {
             startNewSession()
         }
         .onChange(of: env.hasAPIKey) { Task { await env.refreshModels() } }
+        .onChange(of: env.hasOpenRouterKey) { Task { await env.refreshImageModels() } }
         #if os(iOS)
         // iOS suspension silently kills MCP sockets while the clients still
         // report connected — every tool call would then hang. Rebuild the

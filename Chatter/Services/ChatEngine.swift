@@ -17,7 +17,14 @@ final class ChatEngine {
     private let memory = MemoryToolProvider()
     private let skills = SkillToolProvider()
     private let reminders = ReminderToolProvider()
+    private let imageGen: ImageGenToolProvider
     private let maxToolIterations = 42
+
+    /// Whether the imagegen tool may be offered (agent opt-in is checked
+    /// separately). A var so tests can open the gate without a keychain key.
+    var isImageGenConfigured: () -> Bool = {
+        KeychainService.hasOpenRouterAPIKey && !AppSettings.imageGenModel.isEmpty
+    }
 
     /// Where a running turn spends its time before the first assistant token
     /// exists — read by the chat view to show a status row instead of looking
@@ -33,11 +40,12 @@ final class ChatEngine {
     /// (the iOS 26 continued-processing Live Activity); nil in tests.
     var onToolRound: (@MainActor (_ sessionID: UUID, _ round: Int, _ maxRounds: Int) -> Void)?
 
-    init(ollama: OllamaServiceProtocol, mcp: MCPClientProtocol, knowledge: KnowledgeToolProviding, artifacts: ArtifactToolProvider) {
+    init(ollama: OllamaServiceProtocol, mcp: MCPClientProtocol, knowledge: KnowledgeToolProviding, artifacts: ArtifactToolProvider, imageGen: ImageGenToolProvider? = nil) {
         self.ollama = ollama
         self.mcp = mcp
         self.knowledge = knowledge
         self.artifacts = artifacts
+        self.imageGen = imageGen ?? ImageGenToolProvider()
         self.web = WebToolProvider(ollama: ollama)
     }
 
@@ -173,6 +181,14 @@ final class ChatEngine {
         let artifactToolNames = Set(artifactTools.map(\.function.name))
         tools += artifactTools
 
+        // Built-in image generation tool (OpenRouter), offered when the agent
+        // opted in and an OpenRouter key + image model are configured.
+        let imageGenTools = (agent?.imageGenEnabled ?? false)
+            && isImageGenConfigured()
+            ? imageGen.tools() : []
+        let imageGenToolNames = Set(imageGenTools.map(\.function.name))
+        tools += imageGenTools
+
         // The knowledge overview is stable within one send; compute it once
         // instead of per tool-loop iteration (it fetches and walks bundles).
         // Same for the skill index and the memory listing — a mid-turn save
@@ -189,6 +205,7 @@ final class ChatEngine {
             ? memory.systemPromptSection(agentID: agent?.id, context: context)
             : nil
         let remindersSection = reminders.systemPromptSection(agentID: agent?.id, context: context)
+        let imageGenSection = imageGenTools.isEmpty ? nil : ImageGenToolProvider.systemPromptSection
 
         // Vision fallback: if the chat model can't process images, the global
         // vision model describes every not-yet-described image message once. The
@@ -278,7 +295,8 @@ final class ChatEngine {
                         skillsSection: skillsSection,
                         memorySection: memorySection,
                         remindersSection: remindersSection,
-                        artifactSection: ArtifactToolProvider.systemPromptSection
+                        artifactSection: ArtifactToolProvider.systemPromptSection,
+                        imageGenSection: imageGenSection
                     )
                 )
             ]
@@ -444,6 +462,13 @@ final class ChatEngine {
                             sourceToolCallID: persistedCalls[answered].id,
                             context: context
                         )
+                    } else if imageGenToolNames.contains(name) {
+                        // The provider inserts the image-carrying assistant
+                        // message itself; the result is just a confirmation.
+                        result = try await imageGen.call(
+                            name: name, argumentsJSON: argsJSON,
+                            session: session, context: context
+                        )
                     } else {
                         result = try await mcp.callTool(namespacedName: name, argumentsJSON: argsJSON)
                     }
@@ -500,7 +525,8 @@ final class ChatEngine {
         skillsSection: String?,
         memorySection: String?,
         remindersSection: String?,
-        artifactSection: String?
+        artifactSection: String?,
+        imageGenSection: String? = nil
     ) -> String {
         let timestamp = "Current Date and Time: \(timestampFormatter.string(from: Date()))"
         var parts: [String] = []
@@ -511,6 +537,7 @@ final class ChatEngine {
         if let memorySection { parts.append(memorySection) }
         if let remindersSection { parts.append(remindersSection) }
         if let artifactSection { parts.append(artifactSection) }
+        if let imageGenSection { parts.append(imageGenSection) }
         parts.append(Self.choicesSection)
         parts.append(timestamp)
         return parts.joined(separator: "\n\n")

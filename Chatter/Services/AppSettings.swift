@@ -4,6 +4,7 @@ import Foundation
 /// no CloudKit schema/sync involvement (unlike @Model data).
 enum AppSettings {
     private static let visionModelKey = "visionModel"
+    private static let imageGenModelKey = "imageGenModel"
     private static let deviceIDKey = "deviceID"
 
     /// Globally configured vision fallback model (Settings → Vision).
@@ -11,6 +12,14 @@ enum AppSettings {
     static var visionModel: String {
         get { UserDefaults.standard.string(forKey: visionModelKey) ?? "" }
         set { UserDefaults.standard.set(newValue, forKey: visionModelKey) }
+    }
+
+    /// OpenRouter model used by the imagegen__generate tool (Settings →
+    /// OpenRouter). Empty string = the tool stays off. Defaults to Google's
+    /// image model; "None" in the picker stores an explicit empty string.
+    static var imageGenModel: String {
+        get { UserDefaults.standard.string(forKey: imageGenModelKey) ?? "google/gemini-2.5-flash-image" }
+        set { UserDefaults.standard.set(newValue, forKey: imageGenModelKey) }
     }
 
     /// Stable per-device identifier, generated on first read. Used for

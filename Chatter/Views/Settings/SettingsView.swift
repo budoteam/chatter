@@ -11,6 +11,9 @@ struct SettingsView: View {
     @State private var savedConfirmation = false
     /// Keychain write failures — saving must not fail silently (log only).
     @State private var keySaveError: String?
+    @State private var openRouterKey = ""
+    @State private var openRouterSavedConfirmation = false
+    @State private var openRouterKeySaveError: String?
     @State private var editingServer: MCPServerConfig?
     @State private var showingNewServer = false
 
@@ -18,6 +21,7 @@ struct SettingsView: View {
         Form {
             apiKeySection
             visionSection
+            openRouterSection
             mcpSection
             syncSection
             aboutSection
@@ -31,7 +35,10 @@ struct SettingsView: View {
             }
             #endif
         }
-        .onAppear { apiKey = KeychainService.loadAPIKey() ?? "" }
+        .onAppear {
+            apiKey = KeychainService.loadAPIKey() ?? ""
+            openRouterKey = KeychainService.loadOpenRouterAPIKey() ?? ""
+        }
         .sheet(item: $editingServer) { server in
             MCPServerEditorView(server: server)
         }
@@ -105,6 +112,66 @@ struct SettingsView: View {
             Text("Vision")
         } footer: {
             Text("Describes attached images when the agent's model can't process images itself. The description is sent to the agent's model as text. Stored on this device only.")
+        }
+    }
+
+    // MARK: - OpenRouter (image generation)
+
+    private var openRouterSection: some View {
+        Section {
+            SecureField("OpenRouter API key", text: $openRouterKey)
+            HStack {
+                Button("Save Key") { saveOpenRouterKey() }
+                    .disabled(openRouterKey.trimmingCharacters(in: .whitespaces).isEmpty)
+                if env.hasOpenRouterKey {
+                    Spacer()
+                    Button("Clear", role: .destructive) { clearOpenRouterKey() }
+                }
+            }
+            if openRouterSavedConfirmation {
+                Label("Saved", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green).font(Theme.Typography.font(.caption))
+            }
+            if let openRouterKeySaveError {
+                Label(openRouterKeySaveError, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red).font(Theme.Typography.font(.caption))
+            }
+            // Live connection status so a bad key (401 etc.) is visible here.
+            if env.isLoadingImageModels {
+                Label("Checking key…", systemImage: "hourglass")
+                    .foregroundStyle(.secondary).font(Theme.Typography.font(.caption))
+            } else if let error = env.imageModelLoadError {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange).font(Theme.Typography.font(.caption))
+            } else if !env.imageModels.isEmpty {
+                Label("Connected — \(env.imageModels.count) image models available", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green).font(Theme.Typography.font(.caption))
+            }
+
+            Picker("Image model", selection: Binding(
+                get: { env.imageGenModel },
+                set: { env.imageGenModel = $0 }
+            )) {
+                Text("None").tag("")
+                // Keep the stored model selectable even if the live list
+                // doesn't (yet) contain it (same pattern as the vision picker).
+                if !env.imageGenModel.isEmpty, !env.imageModels.contains(where: { $0.id == env.imageGenModel }) {
+                    Text(env.imageGenModel).tag(env.imageGenModel)
+                }
+                ForEach(env.imageModels) { model in
+                    Text(model.name).tag(model.id)
+                }
+            }
+            if env.imageModels.isEmpty {
+                Text(env.hasOpenRouterKey
+                     ? "No image models loaded yet."
+                     : "No models loaded. Add your API key above.")
+                    .font(Theme.Typography.font(.caption)).foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("OpenRouter — Image Generation")
+        } footer: {
+            Text("Create a key at openrouter.ai → Keys. Used only for image generation (agents need the image tool enabled); chats always run on Ollama. The key syncs via iCloud Keychain, the model choice is stored on this device only.")
         }
     }
 
@@ -272,6 +339,31 @@ struct SettingsView: View {
         keySaveError = nil
         env.refreshAPIKeyState()
         env.models = []
+    }
+
+    private func saveOpenRouterKey() {
+        openRouterKeySaveError = nil
+        do {
+            try KeychainService.saveOpenRouterAPIKey(openRouterKey.trimmingCharacters(in: .whitespacesAndNewlines))
+            env.refreshOpenRouterKeyState()
+            openRouterSavedConfirmation = true
+            Task {
+                await env.refreshImageModels()
+                try? await Task.sleep(for: .seconds(2))
+                openRouterSavedConfirmation = false
+            }
+        } catch {
+            openRouterKeySaveError = error.localizedDescription
+            AppLogger.ui.error("Save OpenRouter API key failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    private func clearOpenRouterKey() {
+        KeychainService.deleteOpenRouterAPIKey()
+        openRouterKey = ""
+        openRouterKeySaveError = nil
+        env.refreshOpenRouterKeyState()
+        env.imageModels = []
     }
 
     private func deleteServers(_ offsets: IndexSet) {

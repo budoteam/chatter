@@ -24,6 +24,7 @@ struct AgentEditorView: View {
     @State private var selectedServerIDs: Set<UUID> = []
     @State private var selectedBundleIDs: Set<UUID> = []
     @State private var webAccess = true
+    @State private var imageGenEnabled = false
     @State private var thinkingMode: ThinkingMode = .standard
     @State private var supportsThinking = false
     @State private var selectedSkillIDs: Set<UUID> = []
@@ -150,6 +151,14 @@ struct AgentEditorView: View {
                 Text("Web Research")
             } footer: {
                 Text("Lets the agent search the web and read pages via Ollama's web search API (uses your API key).")
+            }
+
+            Section {
+                Toggle("Image generation", isOn: $imageGenEnabled)
+            } header: {
+                Text("Image Generation")
+            } footer: {
+                Text("Lets the agent generate images via OpenRouter. Requires an OpenRouter API key and an image model in Settings.")
             }
 
             Section("MCP Servers") {
@@ -282,6 +291,7 @@ struct AgentEditorView: View {
         skillAuthoring = agent.skillAuthoringEnabled
         memoryEnabled = agent.memoryEnabled
         webAccess = agent.webAccessEnabled
+        imageGenEnabled = agent.imageGenEnabled
         thinkingMode = agent.thinkingMode
         isDefault = agent.isDefault
     }
@@ -303,6 +313,7 @@ struct AgentEditorView: View {
         target.skillAuthoringEnabled = skillAuthoring
         target.memoryEnabled = memoryEnabled
         target.webAccessEnabled = webAccess
+        target.imageGenEnabled = imageGenEnabled
         target.thinkingMode = thinkingMode
         // The default flag is exclusive: setting it here clears it everywhere
         // else (also cleans up legacy duplicates from the old first-launch
