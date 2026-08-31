@@ -12,13 +12,14 @@ final class ImageGenToolProviderTests: XCTestCase {
     private var container: ModelContainer?
 
     override func setUp() {
+        TestDefaults.install()
         MockURLProtocol.reset()
         AppSettings.imageGenModel = "test/image-model"
     }
 
     override func tearDown() {
         MockURLProtocol.reset()
-        AppSettings.imageGenModel = ""
+        TestDefaults.restore()
     }
 
     private func makeContext() throws -> ModelContext {

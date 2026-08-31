@@ -6,13 +6,14 @@ import XCTest
 /// the service reads its key from `apiKeyOverride`).
 final class OpenRouterImageServiceTests: XCTestCase {
     override func setUp() {
+        TestDefaults.install()
         MockURLProtocol.reset()
         AppSettings.imageGenModel = "test/image-model"
     }
 
     override func tearDown() {
         MockURLProtocol.reset()
-        AppSettings.imageGenModel = ""
+        TestDefaults.restore()
     }
 
     private func makeService() -> OpenRouterImageService {

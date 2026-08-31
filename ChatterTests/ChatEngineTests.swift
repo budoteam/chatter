@@ -11,10 +11,15 @@ final class ChatEngineTests: XCTestCase {
     // return and the first insert would trap inside SwiftData.
     private var container: ModelContainer?
 
+    override func setUp() {
+        TestDefaults.install()
+    }
+
     override func tearDown() {
-        // Global UserDefaults-backed setting; without a reset the vision
-        // fallback tests would bleed into each other and into other suites.
-        AppSettings.visionModel = ""
+        // The scratch suite is discarded instead of resetting the real
+        // preferences — isolation makes the old `visionModel = ""` reset
+        // unnecessary.
+        TestDefaults.restore()
         super.tearDown()
     }
 
@@ -597,7 +602,6 @@ final class ChatEngineTests: XCTestCase {
         AppSettings.imageGenModel = "test/image-model"
         defer {
             MockURLProtocol.reset()
-            AppSettings.imageGenModel = ""
         }
         MockURLProtocol.handler = { _ in
             (200, Data(#"{"choices":[{"message":{"role":"assistant","images":[{"type":"image_url","image_url":{"url":"data:image/png;base64,\#(TestImages.tinyPNGBase64)"}}]}}]}"#.utf8))
