@@ -77,6 +77,10 @@ enum TestImages {
     static let tinyPNGBase64 =
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
 
+    /// A second, different 1×1 PNG — valid, so "two distinct images" paths work.
+    static let tinyPNG2Base64 =
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+
     /// Valid Base64, but not an image ("hello") — decode must fail.
     static let notAnImageBase64 = "aGVsbG8="
 }

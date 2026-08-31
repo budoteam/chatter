@@ -14,7 +14,7 @@ final class ImageGenToolProvider {
     /// `ImageAttachment.maxBase64BytesPerMessage`).
     static let maxImagesPerCall = 2
 
-    /// How many of the newest user-attached images are forwarded as editing
+    /// How many of the newest chat images are (with `edit_latest_image`) forwarded as editing
     /// input (image-to-image).
     private static let maxInputImages = 3
 
@@ -51,11 +51,17 @@ final class ImageGenToolProvider {
         You can generate images with the \(generateToolName) tool. Use it whenever \
         the user asks for an image, picture, drawing or photo. Write the prompt as \
         a precise visual description (subject, style, composition, colors) — do not \
-        ask the user first unless the request is genuinely ambiguous. When the user \
-        attached image(s) and asks to change, edit or restyle them, call the tool \
-        with the edit instruction: the newest attached image(s) are automatically \
-        sent to the image model as editing input. The resulting image appears in \
-        the chat automatically; you cannot see its contents, so answer with a \
+        ask the user first unless the request is genuinely ambiguous. Generate \
+        exactly one image by default; only when the user explicitly asks for \
+        multiple images or variants, pass count 2 — the variants are generated \
+        distinctly. When the user \
+        attaches image(s) — or you just generated one — and asks to change, edit \
+        or restyle them, call the tool with the edit instruction and \
+        edit_latest_image set to true: the newest image in the chat is then sent \
+        to the image model as editing input. Keep it false for fresh generations \
+        (including "new/better versions" of a previous image) — an editing input \
+        pins the result to that image's composition. The resulting image appears \
+        in the chat automatically; you cannot see its contents, so answer with a \
         one-line confirmation instead of describing the result.
         """
 
@@ -64,7 +70,7 @@ final class ImageGenToolProvider {
     func tools() -> [OllamaTool] {
         [OllamaTool(function: .init(
             name: Self.generateToolName,
-            description: "Generate an image from a text prompt, or edit/restyle the user's attached image(s) — those are automatically included as input when present. The image is shown to the user in the chat automatically. Use this whenever the user asks for an image, picture, drawing or photo.",
+            description: "Generate an image from a text prompt, or edit/restyle the newest image in the chat when edit_latest_image is true. The image is shown to the user in the chat automatically. Use this whenever the user asks for an image, picture, drawing or photo.",
             parameters: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -74,7 +80,11 @@ final class ImageGenToolProvider {
                     ]),
                     "count": .object([
                         "type": .string("integer"),
-                        "description": .string("How many variants to generate (1 or 2). Defaults to 1."),
+                        "description": .string("How many images to generate (1 or 2). Omit or use 1 unless the user explicitly asks for multiple images or variants; multiple images come out as distinct variants."),
+                    ]),
+                    "edit_latest_image": .object([
+                        "type": .string("boolean"),
+                        "description": .string("True only when the user asks to change, edit or restyle an existing image: the newest image in the chat (user-attached or previously generated) is then sent as editing input. Omit or false for any fresh generation, including new versions of a previous image."),
                     ]),
                 ]),
                 "required": .array([.string("prompt")]),
@@ -106,24 +116,40 @@ final class ImageGenToolProvider {
         }
         count = min(max(count, 1), Self.maxImagesPerCall)
 
-        // Image-to-image: forward the newest attached image(s) as editing
-        // input — the intuitive flow is «attach a photo, ask for the edit»,
-        // and after a generation «now make it darker» iterates on the just-
-        // generated image (assistant attachments only ever come from this
-        // tool, so role doesn't matter here).
-        let inputImages = Array(
+        // Image-to-image only on explicit request: an input image pins the
+        // result to its composition — without the flag, «make 2 better
+        // versions» would return near-copies of the previous generation
+        // instead of fresh images. When set, the newest image message rides
+        // along, whether user-attached or generated (assistant attachments
+        // only ever come from this tool, so role doesn't matter here).
+        var editLatestImage = false
+        if case .object(let object) = parsed, case .bool(let flag) = object["edit_latest_image"] {
+            editLatestImage = flag
+        }
+        let inputImages = editLatestImage ? Array(
             (session.orderedMessages.last {
                 !$0.imageAttachments.isEmpty
             }?.imageAttachments.map(\.base64) ?? []).suffix(Self.maxInputImages)
-        )
+        ) : []
 
         var base64s: [String] = []
-        for _ in 0..<count {
+        for iteration in 0..<count {
             try Task.checkCancellation()
-            base64s.append(contentsOf: try await service.generateImages(prompt: prompt, images: inputImages))
-            if base64s.count >= Self.maxImagesPerCall { break }
+            // Variants: the same request twice can return the same image
+            // from some image models — the repeat gets an explicit variant
+            // hint.
+            let effectivePrompt = iteration == 0 ? prompt
+                : prompt + "\n\nCreate a distinctly different variant (composition, perspective, details) — variant \(iteration + 1) of \(count)."
+            base64s.append(contentsOf: try await service.generateImages(prompt: effectivePrompt, images: inputImages))
+            if base64s.count >= count { break }
         }
-        base64s = Array(base64s.prefix(Self.maxImagesPerCall))
+        // The API can deliver the same image multiple times in one response
+        // (observed with gemini-2.5-flash-image via OpenRouter): drop byte-
+        // identical payloads, then deliver exactly the requested count — the
+        // former maxImagesPerCall cap let a second, unrequested image through.
+        var seen = Set<String>()
+        base64s = base64s.filter { seen.insert($0).inserted }
+        base64s = Array(base64s.prefix(count))
 
         // Recompress: the raw payloads would blow the per-message CloudKit
         // record budget; undecodable payloads are dropped.
