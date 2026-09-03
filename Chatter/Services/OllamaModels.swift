@@ -61,6 +61,43 @@ struct OllamaChatMessage: Codable {
     }
 }
 
+// MARK: - Usage (/api/usage)
+
+/// Subscription usage from `/api/usage`. `usage` fractions are 0...1.
+struct OllamaUsageResponse: Codable {
+    var activity: Activity?
+    var limits: Limits?
+
+    struct Activity: Codable {
+        /// Total cost of the last 4 weeks, as a decimal string (e.g. "12.34").
+        var cost: String?
+        var models: [OllamaUsageModel]?
+    }
+
+    struct Limits: Codable {
+        var monthly: OllamaUsageLimit?
+        var weekly: OllamaUsageLimit?
+        var session: OllamaUsageLimit?
+    }
+}
+
+struct OllamaUsageLimit: Codable {
+    /// Fraction of the quota consumed (0...1).
+    var usage: Double?
+    var models: [OllamaUsageModel]?
+}
+
+struct OllamaUsageModel: Codable, Hashable {
+    var name: String
+    var requestCount: Int
+    var cost: String?
+
+    enum CodingKeys: String, CodingKey {
+        case name, cost
+        case requestCount = "request_count"
+    }
+}
+
 // MARK: - Web research (/api/web_search, /api/web_fetch)
 
 struct OllamaWebSearchRequest: Codable {

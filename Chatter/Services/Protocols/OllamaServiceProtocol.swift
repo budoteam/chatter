@@ -16,6 +16,9 @@ protocol OllamaServiceProtocol {
     /// Fetches one web page via ollama.com's research API.
     func webFetch(url: String) async throws -> OllamaWebFetchResponse
 
+    /// Subscription usage (monthly/weekly/session quotas) from `/api/usage`.
+    func usage() async throws -> OllamaUsageResponse
+
     /// Streams a chat completion from `/api/chat`. Emits incremental content
     /// deltas and a final chunk carrying any tool calls + `done`.
     /// `think` requests/suppresses the model's reasoning mode (nil = default).
@@ -41,6 +44,11 @@ extension OllamaServiceProtocol {
 
     func webFetch(url: String) async throws -> OllamaWebFetchResponse {
         OllamaWebFetchResponse()
+    }
+
+    /// Default for mocks/tests; the real service calls `/api/usage`.
+    func usage() async throws -> OllamaUsageResponse {
+        OllamaUsageResponse()
     }
 
     /// Short form without a thinking override.

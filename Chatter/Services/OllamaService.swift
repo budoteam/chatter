@@ -69,6 +69,17 @@ struct OllamaService: OllamaServiceProtocol {
         }
     }
 
+    // MARK: - Usage
+
+    func usage() async throws -> OllamaUsageResponse {
+        let data = try await performRequest(path: "/api/usage", method: "GET")
+        do {
+            return try JSONDecoder().decode(OllamaUsageResponse.self, from: data)
+        } catch {
+            throw ServiceError.decoding(error.localizedDescription)
+        }
+    }
+
     // MARK: - Web research
 
     func webSearch(query: String, maxResults: Int) async throws -> OllamaWebSearchResponse {

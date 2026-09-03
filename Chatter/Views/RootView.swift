@@ -65,6 +65,7 @@ struct RootView: View {
             env.runDueReminderActions(context: context)
             await env.refreshModels()
             await env.refreshImageModels()
+            await env.usage.refresh(using: env.ollama)
             backfillAgentModels()
             await env.mcp.syncConnections(configs: allServers())
             #if DEBUG
@@ -84,7 +85,12 @@ struct RootView: View {
             env.takePendingNewSession()
             startNewSession()
         }
-        .onChange(of: env.hasAPIKey) { Task { await env.refreshModels() } }
+        .onChange(of: env.hasAPIKey) {
+            Task {
+                await env.refreshModels()
+                await env.usage.refresh(using: env.ollama)
+            }
+        }
         .onChange(of: env.hasOpenRouterKey) { Task { await env.refreshImageModels() } }
         #if os(iOS)
         // iOS suspension silently kills MCP sockets while the clients still

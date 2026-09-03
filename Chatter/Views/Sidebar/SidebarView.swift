@@ -87,6 +87,7 @@ struct SidebarView: View {
             Rectangle()
                 .fill(Theme.separator)
                 .frame(height: 1)
+            UsageStatusView()
             HStack(spacing: 8) {
                 navButton(title: "Agents", systemImage: "person.2.fill", screen: .agents)
                 navButton(title: "Knowledge", systemImage: "books.vertical.fill", screen: .knowledge)

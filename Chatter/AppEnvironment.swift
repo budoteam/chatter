@@ -26,6 +26,8 @@ final class AppEnvironment {
     let openRouterImages = OpenRouterImageService()
     /// Watches CloudKit sync events for the Settings status section.
     let sync = CloudSyncMonitor()
+    /// Ollama Cloud subscription usage for the sidebar status.
+    let usage = UsageMonitor()
 
     var selectedSession: ChatSession?
     /// Which screen the detail column shows (chat / agents / knowledge).
