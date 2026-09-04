@@ -65,6 +65,7 @@ final class ChatEngine {
     func send(
         text: String,
         images: [ImageAttachment] = [],
+        documents: [DocumentDraft] = [],
         session: ChatSession,
         agent: Agent?,
         context: ModelContext
@@ -73,8 +74,13 @@ final class ChatEngine {
         guard !model.isEmpty else { throw EngineError.noModel }
         session.modelId = model
 
-        let userMsg = Message(role: .user, content: text, orderIndex: session.nextOrderIndex)
+        // Document text rides inline in `content` (with a marker header per
+        // file) so the model sees it verbatim on every synced device; the UI
+        // strips the blocks again via `typedContent` and shows chips.
+        let content = DocumentPromptFormat.compose(text: text, documents: documents)
+        let userMsg = Message(role: .user, content: content, orderIndex: session.nextOrderIndex)
         userMsg.imageAttachments = images
+        userMsg.documentAttachments = documents.map(\.attachment)
         userMsg.session = session
         context.insert(userMsg)
         session.updatedAt = .now
@@ -565,7 +571,9 @@ final class ChatEngine {
     private func maybeAutoTitle(_ session: ChatSession) {
         guard session.title == "New Chat" || session.title.isEmpty else { return }
         guard let first = session.orderedMessages.first(where: { $0.role == .user }) else { return }
-        let text = first.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        // typedContent, not content: attached document blocks would otherwise
+        // title the chat "[Document: …" when the message had no typed text.
+        let text = first.typedContent.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         session.title = String(text.prefix(48))
     }

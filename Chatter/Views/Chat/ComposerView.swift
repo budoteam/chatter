@@ -34,6 +34,9 @@ struct ComposerView: View {
             if !viewModel.pendingImages.isEmpty {
                 thumbnailStrip
             }
+            if !viewModel.pendingDocuments.isEmpty {
+                documentStrip
+            }
             if viewModel.imageLimitHit {
                 Text("Some images were skipped — attachments are limited to 700 KB per message so the chat keeps syncing via iCloud.")
                     .font(Theme.Typography.font(.caption))
@@ -42,6 +45,18 @@ struct ComposerView: View {
             }
             if viewModel.imageImportFailed {
                 Text("Some images couldn't be loaded — they may still be syncing from iCloud. Please try again.")
+                    .font(Theme.Typography.font(.caption))
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 4)
+            }
+            if viewModel.documentLimitHit {
+                Text("Some PDFs were skipped — document text is limited to 200'000 characters per message.")
+                    .font(Theme.Typography.font(.caption))
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 4)
+            }
+            if viewModel.documentImportFailed {
+                Text("Some PDFs yielded no text — they may be corrupt, or scans that even OCR couldn't read.")
                     .font(Theme.Typography.font(.caption))
                     .foregroundStyle(.orange)
                     .padding(.horizontal, 4)
@@ -142,7 +157,11 @@ struct ComposerView: View {
             }
         }
         #endif
-        .fileImporter(isPresented: $showFilePicker, allowedContentTypes: [.image], allowsMultipleSelection: true) { result in
+        .fileImporter(
+            isPresented: $showFilePicker,
+            allowedContentTypes: viewModel.canAttachImages ? [.image, .pdf] : [.pdf],
+            allowsMultipleSelection: true
+        ) { result in
             guard case .success(let urls) = result else { return }
             Task { await loadFileURLs(urls) }
         }
@@ -192,6 +211,20 @@ struct ComposerView: View {
         }
     }
 
+    private var documentStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(viewModel.pendingDocuments) { draft in
+                    DocumentChip(document: draft.attachment) {
+                        viewModel.pendingDocuments.removeAll { $0.id == draft.id }
+                    }
+                }
+            }
+            .padding(.horizontal, 4)
+            .padding(.top, 2)
+        }
+    }
+
     private var photoButton: some View {
         PhotosPicker(
             selection: $photoItems,
@@ -221,19 +254,20 @@ struct ComposerView: View {
         Button { showFilePicker = true } label: {
             Image(systemName: "paperclip")
                 .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(viewModel.canAttachImages ? Color.secondary : Color.secondary.opacity(0.35))
+                .foregroundStyle(Color.secondary)
                 .frame(width: 30, height: 30)
                 .background(Theme.surfaceRaised, in: Circle())
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .disabled(!viewModel.canAttachImages)
+        // PDFs work with every model (their text is extracted locally);
+        // image files stay gated on the model's vision capability.
         .help(viewModel.canAttachImages
-            ? "Attach image files"
-            : "This model doesn’t support images")
+            ? "Attach images or PDFs"
+            : "Attach PDFs")
         .accessibilityLabel(Text(viewModel.canAttachImages
-            ? "Attach image files"
-            : "This model doesn’t support images"))
+            ? "Attach images or PDFs"
+            : "Attach PDFs"))
     }
 
     private func loadPickedImages(_ items: [PhotosPickerItem]) async {
@@ -325,22 +359,49 @@ struct ComposerView: View {
 
     private func loadFileURLs(_ urls: [URL]) async {
         var base64s: [String] = []
-        var failed = 0
+        var drafts: [DocumentDraft] = []
+        var failedImages = 0
+        var failedPDFs = 0
         for url in urls {
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-            if let data = try? Data(contentsOf: url),
-               let base64 = ImageAttachmentProcessor.makeBase64JPEG(from: data) {
+            guard let data = try? Data(contentsOf: url) else {
+                if Self.isPDF(url) { failedPDFs += 1 } else { failedImages += 1 }
+                continue
+            }
+            if Self.isPDF(url) {
+                if let draft = await Self.makeDraft(from: data, fileName: url.lastPathComponent) {
+                    drafts.append(draft)
+                } else {
+                    failedPDFs += 1
+                }
+            } else if let base64 = ImageAttachmentProcessor.makeBase64JPEG(from: data) {
                 base64s.append(base64)
             } else {
-                failed += 1
+                failedImages += 1
             }
         }
-        if failed > 0 {
-            AppLogger.ui.error("Image file import: \(failed, privacy: .public) of \(urls.count, privacy: .public) file(s) could not be loaded")
+        if failedImages > 0 {
+            AppLogger.ui.error("Image file import: \(failedImages, privacy: .public) file(s) could not be loaded")
+        }
+        if failedPDFs > 0 {
+            AppLogger.ui.error("PDF import: \(failedPDFs, privacy: .public) file(s) yielded no text")
         }
         viewModel.addBase64Images(base64s)
-        viewModel.imageImportFailed = failed > 0
+        viewModel.addDocuments(drafts)
+        viewModel.imageImportFailed = failedImages > 0
+        viewModel.documentImportFailed = failedPDFs > 0
+    }
+
+    private static func isPDF(_ url: URL) -> Bool {
+        UTType(filenameExtension: url.pathExtension)?.conforms(to: .pdf) ?? false
+    }
+
+    /// Extraction + possible OCR are CPU-bound — off the main thread.
+    static func makeDraft(from data: Data, fileName: String) async -> DocumentDraft? {
+        await Task.detached(operation: {
+            PDFAttachmentProcessor.makeDraft(from: data, fileName: fileName)
+        }).value
     }
 
     // MARK: - Agent selector (the agent defines the model)

@@ -135,6 +135,35 @@ final class ChatEngineTests: XCTestCase {
 
     // MARK: - Tests
 
+    /// A PDF attachment is embedded into the user message inline (marker
+    /// header + extracted text), persists its metadata, and reaches the
+    /// model verbatim; `typedContent` keeps the bubble clean.
+    func testSendEmbedsDocumentTextInline() async throws {
+        let context = try makeContext()
+        let (agent, session) = makeSession(in: context)
+        let ollama = MockOllamaService()
+        ollama.makeStream = { _, _ in
+            self.stream(of: [.delta("ok"), .done(reason: "stop")])
+        }
+        let engine = ChatEngine(ollama: ollama, mcp: MockMCPClient(), knowledge: FakeKnowledge(), artifacts: ArtifactToolProvider())
+
+        let draft = DocumentDraft(
+            attachment: DocumentAttachment(fileName: "report.pdf", pageCount: 2),
+            text: "Quarterly revenue grew."
+        )
+        try await engine.send(text: "Summarize this", documents: [draft], session: session, agent: agent, context: context)
+
+        let user = try XCTUnwrap(session.orderedMessages.first { $0.role == .user })
+        XCTAssertEqual(user.typedContent, "Summarize this")
+        XCTAssertTrue(user.content.contains("[Document: report.pdf — 2 pages]"))
+        XCTAssertTrue(user.content.contains("Quarterly revenue grew."))
+        XCTAssertEqual(user.documentAttachments.map(\.fileName), ["report.pdf"])
+
+        let sentMessages = try XCTUnwrap(ollama.messagesPerCall.first)
+        let sentUser = try XCTUnwrap(sentMessages.last { $0.role == "user" })
+        XCTAssertTrue(sentUser.content.contains("Quarterly revenue grew."))
+    }
+
     /// Tool round → tool message with the result is persisted, the second
     /// stream round runs and its text lands as an assistant message.
     func testToolRoundFeedsResultIntoSecondStream() async throws {

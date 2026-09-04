@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UniformTypeIdentifiers
 
 struct ChatView: View {
     let session: ChatSession
@@ -25,9 +26,9 @@ struct ChatView: View {
             transcript
             ComposerView(viewModel: viewModel, session: session, onSend: send)
         }
-        .onDrop(of: [.image], isTargeted: $dropTargeted) { handleImageDrop($0) }
+        .onDrop(of: [.image, .pdf], isTargeted: $dropTargeted) { handleDrop($0) }
         .overlay {
-            if dropTargeted && viewModel.canAttachImages {
+            if dropTargeted {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .fill(.ultraThinMaterial)
                     .overlay {
@@ -35,12 +36,12 @@ struct ChatView: View {
                             .strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 2, dash: [8, 6]))
                     }
                     .overlay {
-                        Label("Drop images to attach", systemImage: "photo.badge.plus")
+                        Label("Drop images or PDFs to attach", systemImage: "doc.badge.plus")
                             .font(Theme.Typography.font(.title2))
                             .foregroundStyle(Color.accentColor)
                     }
                     .padding(6)
-                    .onDrop(of: [.image], isTargeted: nil) { handleImageDrop($0) }
+                    .onDrop(of: [.image, .pdf], isTargeted: nil) { handleDrop($0) }
             }
         }
         .navigationTitle(session.title.isEmpty ? "New Chat" : session.title)
@@ -362,15 +363,68 @@ struct ChatView: View {
         }
     }
 
-    /// Accepts an image drop anywhere in the chat: rejected when the model
-    /// can't see images (drop falls through), otherwise the providers are
-    /// turned into attachments asynchronously.
-    private func handleImageDrop(_ providers: [NSItemProvider]) -> Bool {
-        guard viewModel.canAttachImages else { return false }
-        Task {
-            viewModel.addBase64Images(await ImageAttachmentProcessor.makeBase64JPEGs(from: providers))
+    /// Accepts an image or PDF drop anywhere in the chat. PDFs are handled
+    /// for every model (their text is extracted locally); image providers
+    /// are rejected when the model can't see images (drop falls through).
+    private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
+        let pdfProviders = providers.filter {
+            $0.hasItemConformingToTypeIdentifier(UTType.pdf.identifier)
         }
-        return true
+        let imageProviders = providers.filter {
+            !$0.hasItemConformingToTypeIdentifier(UTType.pdf.identifier)
+        }
+        var handled = false
+        if !pdfProviders.isEmpty {
+            handled = true
+            Task { await loadDroppedPDFs(pdfProviders) }
+        }
+        if !imageProviders.isEmpty, viewModel.canAttachImages {
+            handled = true
+            Task {
+                viewModel.addBase64Images(await ImageAttachmentProcessor.makeBase64JPEGs(from: imageProviders))
+            }
+        }
+        return handled
+    }
+
+    private func loadDroppedPDFs(_ providers: [NSItemProvider]) async {
+        var drafts: [DocumentDraft] = []
+        var failed = 0
+        for provider in providers {
+            if let draft = await Self.draft(from: provider) {
+                drafts.append(draft)
+            } else {
+                failed += 1
+            }
+        }
+        if failed > 0 {
+            AppLogger.ui.error("PDF drop: \(failed, privacy: .public) of \(providers.count, privacy: .public) file(s) yielded no text")
+        }
+        viewModel.addDocuments(drafts)
+        viewModel.documentImportFailed = failed > 0
+    }
+
+    /// A dropped PDF arrives either as a file URL (Finder) or as raw data
+    /// (browser, mail); both feed the same extraction pipeline.
+    private static func draft(from provider: NSItemProvider) async -> DocumentDraft? {
+        guard let item = try? await provider.loadItem(forTypeIdentifier: UTType.pdf.identifier)
+        else { return nil }
+        let data: Data?
+        let fileName: String
+        if let url = item as? URL {
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            data = try? Data(contentsOf: url)
+            fileName = url.lastPathComponent
+        } else if let raw = item as? Data {
+            data = raw
+            fileName = provider.suggestedName.map { $0.hasSuffix(".pdf") ? $0 : $0 + ".pdf" }
+                ?? "Document.pdf"
+        } else {
+            return nil
+        }
+        guard let data else { return nil }
+        return await ComposerView.makeDraft(from: data, fileName: fileName)
     }
 
     private func send() {

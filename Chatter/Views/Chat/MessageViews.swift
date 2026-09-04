@@ -68,7 +68,11 @@ struct UserBubble: View {
     let message: Message
 
     private var attachments: [ImageAttachment] { message.imageAttachments }
-    private var hasText: Bool { !message.content.isEmpty }
+    private var documents: [DocumentAttachment] { message.documentAttachments }
+    /// Document text blocks stay in `content` for the model but render as
+    /// chips here — a 100-page PDF must not become a 100-page bubble.
+    private var text: String { message.typedContent }
+    private var hasText: Bool { !text.isEmpty }
 
     var body: some View {
         HStack {
@@ -79,8 +83,13 @@ struct UserBubble: View {
                         AttachmentThumbnail(base64: attachment.base64, size: 160)
                     }
                 }
+                if !documents.isEmpty {
+                    ForEach(documents) { document in
+                        DocumentChip(document: document)
+                    }
+                }
                 if hasText {
-                    Text(message.content)
+                    Text(text)
                         .textSelection(.enabled)
                         .padding(.horizontal, 15)
                         .padding(.vertical, 10)

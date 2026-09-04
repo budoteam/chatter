@@ -126,7 +126,11 @@ struct WatchChatView: View {
         case .user:
             HStack {
                 Spacer(minLength: 24)
-                Text(message.content)
+                // typedContent: PDF text blocks stay in `content` for the
+                // model but must not fill the watch bubble.
+                Text(message.typedContent.isEmpty
+                    ? message.documentAttachments.map(\.fileName).joined(separator: ", ")
+                    : message.typedContent)
                     .font(.callout)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)

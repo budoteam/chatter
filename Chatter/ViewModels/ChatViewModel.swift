@@ -8,6 +8,7 @@ import SwiftUI
 final class ChatViewModel {
     var inputText = ""
     var pendingImages: [ImageAttachment] = []
+    var pendingDocuments: [DocumentDraft] = []
     var errorMessage: String?
     var canAttachImages = false
     /// Set when an offered image was refused because it would push the message's
@@ -16,27 +17,37 @@ final class ChatViewModel {
     /// Set when picked/imported images could not be loaded at all (iCloud
     /// fetch failure, undecodable asset); read by the composer banner.
     var imageImportFailed = false
+    /// Set when a PDF was refused because the message's document-text budget
+    /// was exhausted; read by the composer banner.
+    var documentLimitHit = false
+    /// Set when a picked PDF yielded no text (corrupt, or a scan that even
+    /// OCR couldn't read); read by the composer banner.
+    var documentImportFailed = false
 
     /// Whether the composer holds sendable content. Whether a send may start
     /// also depends on the session's turn state, which `AppEnvironment` owns
     /// (it must survive this view model being recreated on session switches).
     var hasDraft: Bool {
         let hasText = !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        return hasText || !pendingImages.isEmpty
+        return hasText || !pendingImages.isEmpty || !pendingDocuments.isEmpty
     }
 
     func send(env: AppEnvironment, session: ChatSession, agent: Agent?, context: ModelContext) {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         let images = pendingImages
-        guard (!text.isEmpty || !images.isEmpty), !env.isSending(session) else { return }
+        let documents = pendingDocuments
+        guard (!text.isEmpty || !images.isEmpty || !documents.isEmpty), !env.isSending(session) else { return }
         inputText = ""
         pendingImages = []
+        pendingDocuments = []
         imageLimitHit = false
         imageImportFailed = false
+        documentLimitHit = false
+        documentImportFailed = false
 
         env.runTurn(for: session, context: context) { [weak self] in
             do {
-                try await env.engine.send(text: text, images: images, session: session, agent: agent, context: context)
+                try await env.engine.send(text: text, images: images, documents: documents, session: session, agent: agent, context: context)
             } catch is CancellationError {
                 // User stopped — nothing to surface.
             } catch let error as ChatEngine.EngineError {
@@ -49,6 +60,7 @@ final class ChatViewModel {
                 if case .noModel = error, let self, self.inputText.isEmpty, self.pendingImages.isEmpty {
                     self.inputText = text
                     self.pendingImages = images
+                    self.pendingDocuments = documents
                 }
             } catch {
                 self?.errorMessage = error.localizedDescription
@@ -75,6 +87,22 @@ final class ChatViewModel {
             pendingImages.append(ImageAttachment(base64: base64))
         }
         imageLimitHit = skipped
+    }
+
+    /// Appends extracted PDFs under the per-message text budget; drafts that
+    /// would exceed it are skipped and surface the budget hint. Shared sink
+    /// for the file panel and drops.
+    func addDocuments(_ drafts: [DocumentDraft]) {
+        var skipped = false
+        for draft in drafts {
+            let used = pendingDocuments.reduce(0) { $0 + $1.text.count }
+            guard used + draft.text.count <= DocumentAttachment.maxCharactersPerMessage else {
+                skipped = true
+                continue
+            }
+            pendingDocuments.append(draft)
+        }
+        documentLimitHit = skipped
     }
 
     /// "Redo from here": drops everything after the anchoring user message
@@ -142,6 +170,7 @@ private struct MessageSnapshot {
     let createdAt: Date
     let toolCallsJSON: String?
     let attachmentsJSON: String?
+    let documentsJSON: String?
     let toolName: String?
     let thinking: String?
 
@@ -152,6 +181,7 @@ private struct MessageSnapshot {
         createdAt = message.createdAt
         toolCallsJSON = message.toolCallsJSON
         attachmentsJSON = message.attachmentsJSON
+        documentsJSON = message.documentsJSON
         toolName = message.toolName
         thinking = message.thinking
     }
@@ -164,6 +194,7 @@ private struct MessageSnapshot {
         message.createdAt = createdAt
         message.toolCallsJSON = toolCallsJSON
         message.attachmentsJSON = attachmentsJSON
+        message.documentsJSON = documentsJSON
         message.thinking = thinking
         message.session = session
         context.insert(message)
