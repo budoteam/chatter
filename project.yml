@@ -13,7 +13,7 @@ packages:
 
 settings:
   base:
-    MARKETING_VERSION: "2.8"
+    MARKETING_VERSION: "2.9"
     # Build number scheme: <yyyymmdd>.<counter that day>
     CURRENT_PROJECT_VERSION: "20260904.1"
     SWIFT_VERSION: "5.0"
