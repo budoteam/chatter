@@ -123,20 +123,11 @@ struct ChatView: View {
         } else {
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: Theme.Spacing.lg) {
-                        ForEach(transcriptItems) { item in
-                            transcriptItemView(item)
-                                .id(item.id)
-                        }
-                        if let phase = env.engine.turnPhase[session.id] {
-                            TurnPhaseRow(phase: phase)
-                        }
-                        Color.clear.frame(height: 1).id(bottomID)
-                    }
-                    .padding(.horizontal, Theme.Spacing.lg)
-                    .padding(.vertical, Theme.Spacing.md)
-                    .frame(maxWidth: 720)
-                    .frame(maxWidth: .infinity)
+                    transcriptStack
+                        .padding(.horizontal, Theme.Spacing.lg)
+                        .padding(.vertical, Theme.Spacing.md)
+                        .frame(maxWidth: 720)
+                        .frame(maxWidth: .infinity)
                 }
                 .scrollDismissesKeyboard(.interactively)
                 // Per-flush re-pin must be unanimated: an animated scrollTo at
@@ -156,6 +147,38 @@ struct ChatView: View {
                 .onAppear { scrollToBottom(proxy, animated: false) }
             }
         }
+    }
+
+    /// macOS uses a plain VStack on purpose: AppKit's NSScrollView does not
+    /// compensate LazyVStack's estimated heights for de-realized rows (UIKit
+    /// does, silently). With rows as uneven as user bubbles vs. long markdown
+    /// answers, the estimates shift the document height above the viewport and
+    /// the visible region drifts back up on its own while scrolling down.
+    /// Realizing every row keeps the document height exact. The grouping is
+    /// memoized in TranscriptCache, so the eager render stays cheap.
+    @ViewBuilder
+    private var transcriptStack: some View {
+        #if os(macOS)
+        VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+            transcriptRows
+        }
+        #else
+        LazyVStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+            transcriptRows
+        }
+        #endif
+    }
+
+    @ViewBuilder
+    private var transcriptRows: some View {
+        ForEach(transcriptItems) { item in
+            transcriptItemView(item)
+                .id(item.id)
+        }
+        if let phase = env.engine.turnPhase[session.id] {
+            TurnPhaseRow(phase: phase)
+        }
+        Color.clear.frame(height: 1).id(bottomID)
     }
 
     /// Streamed content of the newest message — drives auto-scroll. Includes
