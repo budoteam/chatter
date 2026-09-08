@@ -16,7 +16,7 @@ import AppKit
 /// classic `beginBackgroundTask` buys ~30 s. In both cases expiry maps to a
 /// normal turn cancellation, so partial content stays persisted exactly like
 /// a user-initiated stop. If the user kills the app from the app switcher,
-/// iOS cancels the task silently — nothing can run then (see SERVER-HANDOFF.md).
+    /// iOS cancels the task silently — nothing can run then.
 ///
 /// macOS doesn't suspend backgrounded apps, so keeping alive is a no-op
 /// there; the completion notification still fires when the app is inactive.

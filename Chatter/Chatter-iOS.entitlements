@@ -10,8 +10,10 @@
 	<array>
 		<string>iCloud.team.budo.chatter</string>
 	</array>
-	<!-- Xcode rewrites this to "production" when exporting for TestFlight/App Store. -->
-	<key>aps-environment</key>
-	<string>development</string>
+	<!-- Shared container for the share extension's inbox (PDFs/images). -->
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.team.budo.chatter</string>
+	</array>
 </dict>
 </plist>

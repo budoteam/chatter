@@ -68,8 +68,7 @@ open Chatter.xcodeproj
 
 CloudKit sync is configured: container `iCloud.team.budo.chatter`, per-platform
 entitlements (`Chatter/Chatter-iOS.entitlements`, `Chatter/Chatter-macOS.entitlements`)
-with CloudKit + push, and the `remote-notification` background mode so devices pick up
-changes promptly. `Persistence.makeContainer()` requests `.automatic` CloudKit and falls
+with CloudKit. `Persistence.makeContainer()` requests `.automatic` CloudKit and falls
 back to a local store when iCloud is unavailable (e.g. no signed-in account).
 
 Signing uses `DEVELOPMENT_TEAM` from `project.yml`; building for a different team means
@@ -93,6 +92,7 @@ Chatter/
   Views/         RootView, Sidebar/, Chat/, Agents/, Knowledge/, Settings/, Components/
   DesignSystem/  Theme
 ChatterTests/    OKFCodec, KnowledgeTransfer + PDFKnowledgeImporter tests
+ChatterShareExtension/  iOS share sheet (PDFs/images → app-group inbox → new chat draft)
 ```
 
 ### Knowledge base notes

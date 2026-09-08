@@ -55,6 +55,13 @@ final class AppEnvironment {
     /// Text to pre-fill the composer of the next opened chat (welcome chips).
     var pendingPrompt: String?
 
+    #if os(iOS)
+    /// Attachments delivered by the share extension (app-group inbox), set
+    /// together with a new-session request; consumed by the next opened
+    /// chat's composer (same pattern as `pendingPrompt`).
+    var pendingSharedAttachments: SharedAttachmentPayload?
+    #endif
+
     /// Artifact shown in the side panel (macOS) or sheet (iOS); set by
     /// tapping an artifact pill in the chat, cleared by closing the panel.
     var openArtifactID: PersistentIdentifier?
@@ -145,32 +152,10 @@ final class AppEnvironment {
         activeTurns[session.id] != nil
     }
 
-    /// Sessions with a locally running turn — the handoff server skips
-    /// these (no point executing a turn this Mac is already running).
-    var activeTurnSessionIDs: Set<UUID> { Set(activeTurns.keys) }
-
-    /// Why a turn was stopped. `.handoff` means a server claimed the turn:
-    /// the completion notification is suppressed (the server reports
-    /// completion through the request) and the request stays open.
-    enum TurnStopReason {
-        case user, handoff
-    }
-
-    /// Sessions whose turn was stopped for handoff — consumed by the
-    /// `runTurn` teardown.
-    private var suppressedCompletions: Set<UUID> = []
-
-    /// Sessions this device published a handoff request for (set on
-    /// backgrounding) — the `runTurn` teardown only withdraws those, so
-    /// plain local turns and the never-publishing Mac/watch pay no CloudKit
-    /// query on completion.
-    private var publishedHandoffs: Set<UUID> = []
-
     /// Runs one assistant turn for the session; no-op while one is running.
     /// The turn is wrapped in `TurnRuntimeKeeper` so it survives the app
     /// going to the background (iOS), and finishing while inactive posts a
-    /// local notification. A locally finished turn withdraws its handoff
-    /// request — nothing left for a server to do.
+    /// local notification.
     func runTurn(for session: ChatSession, context: ModelContext, _ body: @escaping @MainActor () async -> Void) {
         let id = session.id
         guard activeTurns[id] == nil else { return }
@@ -181,12 +166,6 @@ final class AppEnvironment {
             await body()
             activeTurns[id] = nil
             TurnRuntimeKeeper.end(sessionID: id)
-            let handedOff = suppressedCompletions.remove(id) != nil
-            let published = publishedHandoffs.remove(id) != nil
-            guard !handedOff else { return }
-            if published, Persistence.storeMode == .cloudKit {
-                await HandoffChannel.cancelOpenRequests(sessionID: id)
-            }
             let preview = session.orderedMessages
                 .last(where: { $0.role == .assistant })
                 .map { String($0.content.prefix(200)) } ?? "Reply ready"
@@ -196,8 +175,7 @@ final class AppEnvironment {
         }
     }
 
-    func stopTurn(for session: ChatSession, reason: TurnStopReason = .user) {
-        if reason == .handoff { suppressedCompletions.insert(session.id) }
+    func stopTurn(for session: ChatSession) {
         activeTurns[session.id]?.cancel()
     }
 
@@ -231,104 +209,6 @@ final class AppEnvironment {
             AppLogger.api.error("listImageModels failed: \(error.localizedDescription, privacy: .public)")
         }
     }
-
-    // MARK: - Handoff (iOS requesting side)
-
-    #if os(iOS)
-    /// Backgrounding with live turns: publish a handoff request per active
-    /// session so any Mac of this iCloud account can take over (the local
-    /// turn keeps running meanwhile — first finisher wins). Goes through
-    /// `HandoffChannel`'s direct CloudKit writes: the SwiftData mirroring
-    /// suspends its exports while the app is backgrounded, so a mirrored
-    /// request would never leave the device in time.
-    ///
-    /// Creates unconditionally (dedup via `publishedHandoffs`): a query
-    /// against a not-yet-existing record type fails, so a pre-create fetch
-    /// would deadlock the very first request — and the write is what pushes
-    /// the type into the Development schema. Stray duplicates (app killed
-    /// between two backgroundings) are filtered server-side
-    /// (`HandoffCoordinator.isStaleDuplicate`) and pruned.
-    func requestHandoffsForActiveTurns(context: ModelContext) async {
-        guard Persistence.storeMode == .cloudKit else { return }
-        for sessionID in activeTurns.keys where !publishedHandoffs.contains(sessionID) {
-            let descriptor = FetchDescriptor<ChatSession>(predicate: #Predicate { $0.id == sessionID })
-            guard let session = try? context.fetch(descriptor).first else { continue }
-            // The prompt rides in the record: this device's SwiftData export
-            // pauses once backgrounded, so the server cannot rely on the
-            // user message having synced. Image prompts stay local-only —
-            // attachments cannot travel in the record.
-            guard let prompt = session.orderedMessages.last(where: { $0.role == .user }),
-                  prompt.imageAttachments.isEmpty else { continue }
-            var request = HandoffRequest(sessionID: sessionID, sessionTitle: session.title)
-            request.promptMessageID = prompt.id
-            request.promptText = prompt.content
-            request.promptOrderIndex = prompt.orderIndex
-            await HandoffChannel.create(request)
-            publishedHandoffs.insert(sessionID)
-        }
-    }
-
-    /// Foreground again: withdraw open requests (local turns continue or
-    /// are done), stop local copies of claimed turns, and sweep completions.
-    func reconcileHandoffsOnActive(context: ModelContext) async {
-        guard Persistence.storeMode == .cloudKit else { return }
-        do {
-            let requests = try await HandoffChannel.fetchAll()
-            stopLocallyClaimedTurns(in: requests, context: context)
-            await notifyCompletedHandoffs(in: requests)
-        } catch {
-            AppLogger.data.error("Handoff reconcile failed: \(error.localizedDescription, privacy: .public)")
-        }
-        await HandoffChannel.cancelOpenRequests()
-        await HandoffChannel.prune()
-    }
-
-    /// Silent push (server wrote a claim or completion): adopt claims and
-    /// notify — deliberately does NOT withdraw open requests, the app is
-    /// still backgrounded with its local turn running.
-    func handleHandoffPush(context: ModelContext) async {
-        guard Persistence.storeMode == .cloudKit else { return }
-        do {
-            let requests = try await HandoffChannel.fetchAll()
-            stopLocallyClaimedTurns(in: requests, context: context)
-            await notifyCompletedHandoffs(in: requests)
-        } catch {
-            AppLogger.data.error("Handoff push handling failed: \(error.localizedDescription, privacy: .public)")
-        }
-        await HandoffChannel.prune()
-    }
-
-    private func stopLocallyClaimedTurns(in requests: [HandoffRequest], context: ModelContext) {
-        for sessionID in activeTurns.keys {
-            guard HandoffCoordinator.claimedRequest(for: sessionID, in: requests) != nil else { continue }
-            let descriptor = FetchDescriptor<ChatSession>(predicate: #Predicate { $0.id == sessionID })
-            guard let session = try? context.fetch(descriptor).first else { continue }
-            AppLogger.data.info("Handoff claimed by a server, stopping local turn for \(sessionID.uuidString, privacy: .public)")
-            stopTurn(for: session, reason: .handoff)
-        }
-    }
-
-    /// Requests already notified this run — first-line dedup so a failed
-    /// `markNotified` (network) doesn't re-post the same notification on the
-    /// next reconcile. Intersected with the fetched set on each sweep.
-    private var notifiedHandoffs: Set<UUID> = []
-
-    private func notifyCompletedHandoffs(in requests: [HandoffRequest]) async {
-        notifiedHandoffs.formIntersection(requests.map(\.id))
-        for request in HandoffCoordinator.completedUnnotified(in: requests)
-        where !notifiedHandoffs.contains(request.id) {
-            notifiedHandoffs.insert(request.id)
-            await TurnRuntimeKeeper.notifyCompletionIfNeeded(
-                sessionID: request.sessionID,
-                title: request.sessionTitle,
-                preview: request.preview
-            )
-            // Marked even when the app is active (no notification posted) —
-            // the user is looking at the result already.
-            await HandoffChannel.markNotified(request)
-        }
-    }
-    #endif
 
     // MARK: - Reminder actions
 

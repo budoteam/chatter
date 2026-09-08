@@ -95,7 +95,8 @@ struct ComposerView: View {
                 placeholder: placeholder,
                 canAttachImages: viewModel.canAttachImages,
                 onSubmit: performSend,
-                onPasteImages: pasteImages
+                onPasteImages: pasteImages,
+                onPastePDFs: pastePDFs
             )
             .padding(.horizontal, 4)
             #endif
@@ -130,11 +131,33 @@ struct ComposerView: View {
                 // keyCode 9 = ANSI V — layout-unabhängig (Dvorak & Co.).
                 guard event.keyCode == 9,
                       mods.contains(.command), !mods.contains(.option), !mods.contains(.control),
-                      focus.wrappedValue, viewModel.canAttachImages,
-                      let base64s = ImageAttachmentProcessor.base64JPEGsFromPasteboard()
+                      focus.wrappedValue
                 else { return event }
-                viewModel.addBase64Images(base64s)
-                return nil
+                if viewModel.canAttachImages,
+                   let base64s = ImageAttachmentProcessor.base64JPEGsFromPasteboard() {
+                    viewModel.addBase64Images(base64s)
+                    return nil
+                }
+                // PDFs sind nicht an Vision-Support gekoppelt: Daten oder
+                // Finder-Dateien aus dem Zwischenspeicher werden Anhänge.
+                let payloads = Self.pasteboardPDFPayloads()
+                if !payloads.isEmpty {
+                    Task {
+                        var drafts: [DocumentDraft] = []
+                        var failed = 0
+                        for payload in payloads {
+                            if let draft = await Self.makeDraft(from: payload.data, fileName: payload.fileName) {
+                                drafts.append(draft)
+                            } else {
+                                failed += 1
+                            }
+                        }
+                        viewModel.addDocuments(drafts)
+                        viewModel.documentImportFailed = failed > 0
+                    }
+                    return nil
+                }
+                return event
             }
         }
         .onDisappear {
@@ -146,14 +169,22 @@ struct ComposerView: View {
             Task { await loadPickedImages(items) }
         }
         #if os(macOS)
-        // Only .image is claimed: text paste and Finder file-copy paste keep
-        // falling through to the text field (a file copy inserts its path).
-        // iOS handles image paste inside ComposerTextField — onPasteCommand
-        // is explicitly unavailable there despite what Apple's docs claim.
-        .onPasteCommand(of: [.image]) { providers in
-            guard viewModel.canAttachImages else { return }
+        // Text paste and non-PDF Finder file-copy paste keep falling through
+        // to the text field (a file copy inserts its path). iOS handles paste
+        // inside ComposerTextField — onPasteCommand is explicitly unavailable
+        // there despite what Apple's docs claim.
+        .onPasteCommand(of: [.image, .pdf]) { providers in
+            let pdfProviders = providers.filter { $0.hasItemConformingToTypeIdentifier(UTType.pdf.identifier) }
+            let imageProviders = providers.filter { $0.hasItemConformingToTypeIdentifier(UTType.image.identifier) }
             Task {
-                viewModel.addBase64Images(await ImageAttachmentProcessor.makeBase64JPEGs(from: providers))
+                if !pdfProviders.isEmpty {
+                    let (drafts, failed) = await Self.loadPDFDrafts(from: pdfProviders)
+                    viewModel.addDocuments(drafts)
+                    viewModel.documentImportFailed = failed > 0
+                }
+                if !imageProviders.isEmpty, viewModel.canAttachImages {
+                    viewModel.addBase64Images(await ImageAttachmentProcessor.makeBase64JPEGs(from: imageProviders))
+                }
             }
         }
         #endif
@@ -404,6 +435,65 @@ struct ComposerView: View {
         }).value
     }
 
+    /// PDFs from the system paste pipeline (data or file-URL payloads) become
+    /// document drafts through the extraction/OCR pipeline. Shared sink for
+    /// the iOS paste callback and the macOS paste command.
+    static func loadPDFDrafts(from providers: [NSItemProvider]) async -> (drafts: [DocumentDraft], failed: Int) {
+        var drafts: [DocumentDraft] = []
+        var failed = 0
+        for provider in providers where provider.hasItemConformingToTypeIdentifier(UTType.pdf.identifier) {
+            guard let payload = try? await provider.loadItem(forTypeIdentifier: UTType.pdf.identifier) else {
+                failed += 1
+                continue
+            }
+            let data: Data?
+            let fileName: String
+            switch payload {
+            case let pdfData as Data:
+                data = pdfData
+                fileName = provider.suggestedName.map { $0 + ".pdf" } ?? "Pasteboard.pdf"
+            case let url as URL:
+                data = try? Data(contentsOf: url)
+                fileName = url.lastPathComponent
+            default:
+                data = nil
+                fileName = "Pasteboard.pdf"
+            }
+            if let data, let draft = await makeDraft(from: data, fileName: fileName) {
+                drafts.append(draft)
+            } else {
+                failed += 1
+            }
+        }
+        if failed > 0 {
+            AppLogger.ui.error("PDF paste: \(failed, privacy: .public) item(s) yielded no text")
+        }
+        return (drafts, failed)
+    }
+
+    #if os(macOS)
+    /// PDF payloads on the general pasteboard: raw PDF data first, then PDF
+    /// file URLs (Finder copy). Empty when nothing PDF-like is on the board.
+    private static func pasteboardPDFPayloads() -> [(data: Data, fileName: String)] {
+        var payloads: [(Data, String)] = []
+        for item in NSPasteboard.general.pasteboardItems ?? [] {
+            if let data = item.data(forType: NSPasteboard.PasteboardType(UTType.pdf.identifier)) {
+                payloads.append((data, "Pasteboard.pdf"))
+            }
+        }
+        let urls = NSPasteboard.general.readObjects(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) as? [URL] ?? []
+        for url in urls where UTType(filenameExtension: url.pathExtension)?.conforms(to: .pdf) ?? false {
+            if let data = try? Data(contentsOf: url) {
+                payloads.append((data, url.lastPathComponent))
+            }
+        }
+        return payloads
+    }
+    #endif
+
     // MARK: - Agent selector (the agent defines the model)
 
     private var agentMenu: some View {
@@ -503,6 +593,16 @@ struct ComposerView: View {
             viewModel.addBase64Images(await ImageAttachmentProcessor.makeBase64JPEGs(from: providers))
         }
     }
+
+    /// PDFs from the system paste pipeline become document attachments —
+    /// unlike images they work with every model (text is extracted locally).
+    private func pastePDFs(_ providers: [NSItemProvider]) {
+        Task {
+            let (drafts, failed) = await Self.loadPDFDrafts(from: providers)
+            viewModel.addDocuments(drafts)
+            viewModel.documentImportFailed = failed > 0
+        }
+    }
     #endif
 
     /// Sends (or stops) and keeps the input field focused so the user can
@@ -556,6 +656,7 @@ private struct ComposerTextField: UIViewRepresentable {
     let canAttachImages: Bool
     let onSubmit: () -> Void
     let onPasteImages: ([NSItemProvider]) -> Void
+    let onPastePDFs: ([NSItemProvider]) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -564,6 +665,7 @@ private struct ComposerTextField: UIViewRepresentable {
         view.delegate = context.coordinator
         view.onSubmit = onSubmit
         view.onPasteImages = onPasteImages
+        view.onPastePDFs = onPastePDFs
         return view
     }
 
@@ -571,6 +673,7 @@ private struct ComposerTextField: UIViewRepresentable {
         context.coordinator.parent = self
         view.onSubmit = onSubmit
         view.onPasteImages = onPasteImages
+        view.onPastePDFs = onPastePDFs
         view.canAttachImages = canAttachImages
         view.placeholderLabel.text = placeholder
         // Programmatic sets don't fire textViewDidChange — keep the
@@ -617,6 +720,7 @@ private struct ComposerTextField: UIViewRepresentable {
 private final class ComposerUITextView: UITextView {
     var onSubmit: (() -> Void)?
     var onPasteImages: (([NSItemProvider]) -> Void)?
+    var onPastePDFs: (([NSItemProvider]) -> Void)?
     var canAttachImages = false
 
     let placeholderLabel = UILabel()
@@ -681,20 +785,29 @@ private final class ComposerUITextView: UITextView {
         super.pressesBegan(presses, with: event)
     }
 
-    // MARK: Paste — images become attachments, text stays in the field.
+    // MARK: Paste — images/PDFs become attachments, text stays in the field.
 
     override var pasteConfiguration: UIPasteConfiguration? {
         get {
-            var types = [UTType.text.identifier, UTType.plainText.identifier, UTType.utf8PlainText.identifier]
+            var types = [UTType.text.identifier, UTType.plainText.identifier, UTType.utf8PlainText.identifier,
+                         UTType.pdf.identifier]
             if canAttachImages { types.insert(UTType.image.identifier, at: 0) }
             return UIPasteConfiguration(acceptableTypeIdentifiers: types)
         }
         set {}
     }
 
+    /// PDF items currently on the general pasteboard.
+    private var pasteboardPDFProviders: [NSItemProvider] {
+        UIPasteboard.general.itemProviders.filter {
+            $0.hasItemConformingToTypeIdentifier(UTType.pdf.identifier)
+        }
+    }
+
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
-        if action == #selector(paste(_:)), canAttachImages, UIPasteboard.general.hasImages {
-            return true
+        if action == #selector(paste(_:)) {
+            if canAttachImages, UIPasteboard.general.hasImages { return true }
+            if !pasteboardPDFProviders.isEmpty { return true }
         }
         return super.canPerformAction(action, withSender: sender)
     }
@@ -704,6 +817,10 @@ private final class ComposerUITextView: UITextView {
         // (rich-text editing is off, so super.paste drops images itself).
         if canAttachImages, UIPasteboard.general.hasImages {
             onPasteImages?(UIPasteboard.general.itemProviders)
+        }
+        let pdfs = pasteboardPDFProviders
+        if !pdfs.isEmpty {
+            onPastePDFs?(pdfs)
         }
         if UIPasteboard.general.hasStrings {
             super.paste(sender)

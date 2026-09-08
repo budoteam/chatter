@@ -310,7 +310,7 @@ final class MCPConnectionManager: MCPClientProtocol {
     /// macOS pendant to the iOS foreground refresh: sleep kills the sockets
     /// while the clients still report connected. Registered lazily on the
     /// first sync; lives on the manager (not a view) so it also fires with
-    /// no window open, e.g. for handoff turns.
+    /// no window open.
     private func startObservingWakeIfNeeded() {
         guard wakeObserver == nil else { return }
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(

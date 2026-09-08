@@ -65,6 +65,16 @@ struct ChatView: View {
                 viewModel.inputText = prompt
                 env.pendingPrompt = nil
             }
+            #if os(iOS)
+            // Share-extension delivery: the session was created for exactly
+            // this payload, so it lands in this fresh composer.
+            if let payload = env.pendingSharedAttachments {
+                viewModel.addBase64Images(payload.images)
+                viewModel.addDocuments(payload.documents)
+                viewModel.documentImportFailed = payload.failed
+                env.pendingSharedAttachments = nil
+            }
+            #endif
         }
         .alert("Error", isPresented: errorBinding) {
             Button("OK", role: .cancel) {}

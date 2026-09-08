@@ -101,9 +101,29 @@ struct RootView: View {
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
             Task { await env.mcp.refreshConnections(configs: allServers()) }
+            drainSharedInbox()
+        }
+        // The share extension opens chatter://share after dropping its
+        // payload into the app-group inbox.
+        .onOpenURL { url in
+            guard url.scheme == "chatter", url.host == "share" else { return }
+            drainSharedInbox()
         }
         #endif
     }
+
+    #if os(iOS)
+    /// Picks up PDFs/images the share extension left in the app-group inbox
+    /// and opens them as a fresh chat draft (the composer shows the chips;
+    /// the user adds text and sends themselves).
+    private func drainSharedInbox() {
+        Task {
+            guard let payload = await SharedInbox.drain(), !payload.isEmpty else { return }
+            env.pendingSharedAttachments = payload
+            startNewSession()
+        }
+    }
+    #endif
 
     private func startNewSession() {
         let agent = env.selectedSession?.agent ?? SessionFactory.defaultAgent(in: agents)
